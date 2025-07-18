@@ -1,0 +1,79 @@
+# Core Dependencies
+crewai==0.22.5
+crewai-tools==0.2.6
+fastapi==0.110.0
+uvicorn[standard]==0.27.1
+pydantic==2.6.1
+pydantic-settings==2.2.1
+python-dotenv==1.0.0
+
+# Azure SDK
+azure-devops==7.1.0b4
+azure-identity==1.15.0
+azure-keyvault-secrets==4.7.0
+azure-storage-blob==12.19.0
+
+# AI/ML
+openai==1.13.3
+langchain==0.1.10
+langchain-openai==0.0.5
+ tiktoken==0.5.2
+
+# Database
+sqlalchemy==2.0.27
+alembic==1.13.1
+asyncpg==0.29.0
+redis==5.0.1
+
+# API Dependencies
+httpx==0.25.1
+aiofiles==23.2.1
+python-multipart==0.0.9
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Logging and Monitoring
+structlog==24.1.0
+prometheus-client==0.20.0
+opentelemetry-api==1.22.0
+opentelemetry-sdk==1.22.0
+opentelemetry-instrumentation-fastapi==0.43b0
+
+# Testing
+#pytest==7.4.0
+#pytest-asyncio==0.23.5
+#pytest-cov==4.1.0
+#pytest-mock==3.12.0
+#pytest-httpx==0.26.0
+
+# Development Tools
+black==24.2.0
+isort==5.13.2
+flake8==7.0.0
+mypy==1.8.0
+pre-commit==3.6.2
+psutil==7.0.0
+# Utilities
+pyyaml>=6.0.0
+python-json-logger==2.0.7
+tenacity==8.2.3
+cachetools==5.3.2
+pytz==2024.1
+sqlparse==0.5.3
+
+# Data Processing
+pandas==2.2.0
+numpy==1.26.4
+jsonschema==3.2.0
+
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.5.9
+mkdocstrings[python]==0.24.0
+
+# Deployment
+gunicorn==21.2.0
+supervisor==4.2.5
+docker==7.0.0
+#docker-compose>=2.0.0

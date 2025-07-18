@@ -1,0 +1,336 @@
+# Azure DevOps Pipeline for PR Validation
+# Triggers on PR creation or update
+
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+      - release/*
+  paths:
+    exclude:
+      - docs/*
+      - README.md
+      - .gitignore
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - group: 'PR-Validation-Variables'
+  - name: API_ENDPOINT
+    value: $(API_GATEWAY_URL)/api/v1/validate
+  - name: PR_ID
+    value: $(System.PullRequest.PullRequestId)
+  - name: SOURCE_BRANCH
+    value: $(System.PullRequest.SourceBranch)
+  - name: TARGET_BRANCH
+    value: $(System.PullRequest.TargetBranch)
+
+stages:
+  - stage: ValidatePR
+    displayName: 'Validate Pull Request'
+    jobs:
+      - job: RunValidation
+        displayName: 'Run PR Validation'
+        steps:
+          # Step 1: Setup Python environment
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.10'
+              addToPath: true
+            displayName: 'Setup Python 3.10'
+
+          # Step 2: Install Azure CLI
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: '$(AZURE_SUBSCRIPTION)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az --version
+                echo "Azure CLI installed successfully"
+            displayName: 'Install Azure CLI'
+
+          # Step 3: Get PR details and modified files
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                $headers = @{
+                  "Authorization" = "Bearer $(System.AccessToken)"
+                  "Content-Type" = "application/json"
+                }
+                
+                $org = "$(System.TeamFoundationCollectionUri)".Split('/')[3]
+                $project = "$(System.TeamProject)"
+                $repoId = "$(Build.Repository.ID)"
+                $prId = "$(System.PullRequest.PullRequestId)"
+                
+                # Get PR details
+                $prUrl = "https://dev.azure.com/$org/$project/_apis/git/repositories/$repoId/pullrequests/$prId?api-version=7.0"
+                $prDetails = Invoke-RestMethod -Uri $prUrl -Headers $headers -Method Get
+                
+                # Get modified files
+                $filesUrl = "https://dev.azure.com/$org/$project/_apis/git/repositories/$repoId/pullrequests/$prId/iterations?api-version=7.0"
+                $iterations = Invoke-RestMethod -Uri $filesUrl -Headers $headers -Method Get
+                $latestIteration = $iterations.value[-1].id
+                
+                $changesUrl = "https://dev.azure.com/$org/$project/_apis/git/repositories/$repoId/pullrequests/$prId/iterations/$latestIteration/changes?api-version=7.0"
+                $changes = Invoke-RestMethod -Uri $changesUrl -Headers $headers -Method Get
+                
+                # Save to file for next step
+                $prData = @{
+                  pr_id = $prId
+                  source_branch = $prDetails.sourceRefName
+                  target_branch = $prDetails.targetRefName
+                  title = $prDetails.title
+                  description = $prDetails.description
+                  created_by = $prDetails.createdBy.displayName
+                  files = $changes.changeEntries | ForEach-Object {
+                    @{
+                      path = $_.item.path
+                      changeType = $_.changeType
+                    }
+                  }
+                }
+                
+                $prData | ConvertTo-Json -Depth 10 | Out-File -FilePath "$(Build.ArtifactStagingDirectory)/pr_data.json"
+                Write-Host "PR data saved to pr_data.json"
+            displayName: 'Get PR Details and Modified Files'
+
+          # Step 4: Call API Gateway for validation
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                $prData = Get-Content -Path "$(Build.ArtifactStagingDirectory)/pr_data.json" | ConvertFrom-Json
+                
+                $headers = @{
+                  "Authorization" = "Bearer $(API_KEY)"
+                  "Content-Type" = "application/json"
+                  "X-Azure-DevOps-Org" = "$(System.TeamFoundationCollectionUri)"
+                  "X-Project" = "$(System.TeamProject)"
+                  "X-Repository" = "$(Build.Repository.Name)"
+                }
+                
+                $body = @{
+                  pr_id = $prData.pr_id
+                  source_branch = $prData.source_branch
+                  target_branch = $prData.target_branch
+                  title = $prData.title
+                  description = $prData.description
+                  created_by = $prData.created_by
+                  files = $prData.files
+                  repository = @{
+                    id = "$(Build.Repository.ID)"
+                    name = "$(Build.Repository.Name)"
+                    url = "$(Build.Repository.Uri)"
+                  }
+                } | ConvertTo-Json -Depth 10
+                
+                Write-Host "Calling validation API..."
+                
+                try {
+                  $response = Invoke-RestMethod -Uri "$(API_ENDPOINT)" -Method Post -Headers $headers -Body $body -TimeoutSec 600
+                  
+                  Write-Host "Validation completed successfully"
+                  Write-Host "Production Ready: $($response.production_ready)"
+                  Write-Host "Critical Issues: $($response.critical_issues_count)"
+                  
+                  # Save response
+                  $response | ConvertTo-Json -Depth 10 | Out-File -FilePath "$(Build.ArtifactStagingDirectory)/validation_report.json"
+                  
+                  # Set pipeline variables
+                  Write-Host "##vso[task.setvariable variable=ProductionReady]$($response.production_ready)"
+                  Write-Host "##vso[task.setvariable variable=CriticalIssues]$($response.critical_issues_count)"
+                  
+                } catch {
+                  Write-Error "Validation API call failed: $_"
+                  exit 1
+                }
+            displayName: 'Call Validation API'
+
+          # Step 5: Process validation results
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                $report = Get-Content -Path "$(Build.ArtifactStagingDirectory)/validation_report.json" | ConvertFrom-Json
+                
+                # Generate markdown report
+                $markdown = @"
+                # PR Validation Report
+                
+                **PR ID:** $($report.pr_id)  
+                **Status:** $(if($report.production_ready) { "✅ Production Ready" } else { "❌ Not Production Ready" })  
+                **Critical Issues:** $($report.critical_issues_count)  
+                
+                ## Technologies Detected
+                $($report.technologies_detected -join ", ")
+                
+                ## Validation Results
+                
+                "@
+                
+                foreach ($result in $report.checkpoint_results) {
+                  $status = if($result.status -eq "PASS") { "✅" } else { "❌" }
+                  $markdown += "`n### $status $($result.technology) - $($result.checkpoint_name)`n"
+                  $markdown += "**Severity:** $($result.severity)`n`n"
+                  
+                  if ($result.violations.Count -gt 0) {
+                    $markdown += "**Violations:**`n"
+                    foreach ($violation in $result.violations) {
+                      $markdown += "- $violation`n"
+                    }
+                    $markdown += "`n**Suggestions:**`n"
+                    foreach ($suggestion in $result.suggestions) {
+                      $markdown += "- $suggestion`n"
+                    }
+                  }
+                }
+                
+                # Save markdown report
+                $markdown | Out-File -FilePath "$(Build.ArtifactStagingDirectory)/validation_report.md"
+                
+                # Post comment to PR
+                if ("$(POST_COMMENTS_TO_PR)" -eq "true") {
+                  Write-Host "Posting validation report to PR..."
+                  # Implementation for posting to PR comments
+                }
+            displayName: 'Process Validation Results'
+
+          # Step 6: Publish artifacts
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)'
+              artifactName: 'validation-reports'
+              publishLocation: 'Container'
+            displayName: 'Publish Validation Reports'
+
+          # Step 7: Update PR status
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                $productionReady = "$(ProductionReady)" -eq "True"
+                $criticalIssues = [int]"$(CriticalIssues)"
+                
+                $status = if($productionReady) { "succeeded" } else { "failed" }
+                $description = if($productionReady) { 
+                  "All production checkpoints passed" 
+                } else { 
+                  "$criticalIssues critical issues found - review required" 
+                }
+                
+                $headers = @{
+                  "Authorization" = "Bearer $(System.AccessToken)"
+                  "Content-Type" = "application/json"
+                }
+                
+                $body = @{
+                  state = $status
+                  description = $description
+                  targetUrl = "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+                  context = @{
+                    name = "PR-Validation/production-readiness"
+                    genre = "continuous-integration"
+                  }
+                } | ConvertTo-Json
+                
+                $org = "$(System.TeamFoundationCollectionUri)".Split('/')[3]
+                $project = "$(System.TeamProject)"
+                $repoId = "$(Build.Repository.ID)"
+                $commitId = "$(Build.SourceVersion)"
+                
+                $statusUrl = "https://dev.azure.com/$org/$project/_apis/git/repositories/$repoId/commits/$commitId/statuses?api-version=7.0"
+                
+                try {
+                  Invoke-RestMethod -Uri $statusUrl -Method Post -Headers $headers -Body $body
+                  Write-Host "PR status updated successfully"
+                } catch {
+                  Write-Warning "Failed to update PR status: $_"
+                }
+                
+                # Fail the pipeline if not production ready
+                if (-not $productionReady) {
+                  Write-Error "PR is not production ready. $criticalIssues critical issues found."
+                  exit 1
+                }
+            displayName: 'Update PR Status'
+
+  - stage: NotifyTeams
+    displayName: 'Notify Teams'
+    condition: always()
+    jobs:
+      - job: SendNotification
+        displayName: 'Send Teams Notification'
+        steps:
+          - task: PowerShell@2
+            inputs:
+              targetType: 'inline'
+              script: |
+                $status = if("$(Agent.JobStatus)" -eq "Succeeded") { "✅ Passed" } else { "❌ Failed" }
+                $color = if("$(Agent.JobStatus)" -eq "Succeeded") { "00FF00" } else { "FF0000" }
+                
+                $message = @{
+                  "@type" = "MessageCard"
+                  "@context" = "https://schema.org/extensions"
+                  "summary" = "PR Validation Result"
+                  "themeColor" = $color
+                  "title" = "PR Validation: $status"
+                  "sections" = @(
+                    @{
+                      "activityTitle" = "Pull Request #$(System.PullRequest.PullRequestId)"
+                      "facts" = @(
+                        @{
+                          "name" = "Repository"
+                          "value" = "$(Build.Repository.Name)"
+                        },
+                        @{
+                          "name" = "Created By"
+                          "value" = "$(Build.RequestedFor)"
+                        },
+                        @{
+                          "name" = "Source Branch"
+                          "value" = "$(System.PullRequest.SourceBranch)"
+                        },
+                        @{
+                          "name" = "Target Branch"
+                          "value" = "$(System.PullRequest.TargetBranch)"
+                        }
+                      )
+                    }
+                  )
+                  "potentialAction" = @(
+                    @{
+                      "@type" = "OpenUri"
+                      "name" = "View PR"
+                      "targets" = @(
+                        @{
+                          "os" = "default"
+                          "uri" = "$(System.PullRequest.WebUrl)"
+                        }
+                      )
+                    },
+                    @{
+                      "@type" = "OpenUri"
+                      "name" = "View Build"
+                      "targets" = @(
+                        @{
+                          "os" = "default"
+                          "uri" = "$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+                        }
+                      )
+                    }
+                  )
+                } | ConvertTo-Json -Depth 10
+                
+                if ("$(TEAMS_WEBHOOK_URL)") {
+                  Invoke-RestMethod -Uri "$(TEAMS_WEBHOOK_URL)" -Method Post -Body $message -ContentType "application/json"
+                  Write-Host "Teams notification sent"
+                }
+            displayName: 'Send Teams Notification'
+            condition: always()

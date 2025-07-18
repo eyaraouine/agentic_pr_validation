@@ -1,0 +1,283 @@
+# Checkpoints Configuration for PR Validation
+# Defines all validation checkpoints by technology
+
+azure_data_factory:
+  display_name: "Azure Data Factory"
+  checkpoints:
+    - id: "adf_naming_convention"
+      name: "Naming Convention"
+      description: "Respect standard naming conventions for pipelines, datasets, dataflows, linked services"
+      severity: "HIGH"
+      enabled: true
+      validation_rules:
+        - pattern: "^[a-z][a-z0-9_]*$"
+          message: "Resource names should be lowercase with underscores"
+        - max_length: 140
+          message: "Resource names should not exceed 140 characters"
+
+    - id: "adf_single_parent_pipeline"
+      name: "Single Parent Pipeline Pattern"
+      description: "Create a parent pipeline which calls child pipelines for better organization"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "adf_no_impact_validation"
+      name: "No Other ADF Resources Impacted"
+      description: "Verify no unintended impacts on other ADF pipelines"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "adf_validation_check"
+      name: "ADF Validation"
+      description: "Azure Data Factory must be validated before creating pull request"
+      severity: "CRITICAL"
+      enabled: true
+
+    - id: "adf_reuse_components"
+      name: "Reuse Existing Components"
+      description: "Use existing datasets and linked services instead of creating duplicates"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "adf_folder_organization"
+      name: "Folders Organization"
+      description: "Group pipelines in folder structure by use case"
+      severity: "LOW"
+      enabled: true
+
+    - id: "adf_security_practices"
+      name: "Security Best Practices"
+      description: "Use MSI or Key Vault authentication, no hardcoded credentials"
+      severity: "CRITICAL"
+      enabled: true
+      validation_rules:
+        - forbidden_patterns:
+            - "password\\s*=\\s*[\"'][^\"']+[\"']"
+            - "accountKey\\s*=\\s*[\"'][^\"']+[\"']"
+            - "connectionString\\s*=\\s*[\"'][^\"']+[\"']"
+          message: "Hardcoded credentials detected"
+
+    - id: "adf_logging_practices"
+      name: "Logging Best Practices"
+      description: "Implement custom logging for each activity"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "adf_performance"
+      name: "Code Performance"
+      description: "Verify data load process time meets requirements"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "adf_test_coverage"
+      name: "Test Development Result"
+      description: "All test case scenarios must be tested"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "adf_parameterization"
+      name: "Parameterization Check"
+      description: "Environment-specific components should use global parameters"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "adf_prod_readiness"
+      name: "PROD Environment Readiness"
+      description: "Connectivity testing of linked services in production"
+      severity: "CRITICAL"
+      enabled: true
+
+    - id: "adf_error_handling"
+      name: "Error Handling and Alerts"
+      description: "Proper error handling and failure alert configuration"
+      severity: "CRITICAL"
+      enabled: true
+
+azure_databricks:
+  display_name: "Azure Databricks"
+  checkpoints:
+    - id: "db_naming_convention"
+      name: "Naming Conventions"
+      description: "Follow project naming convention guidelines"
+      severity: "HIGH"
+      enabled: true
+      validation_rules:
+        - pattern: "^[a-z][a-z0-9_]*$"
+          message: "Notebook names should be lowercase with underscores"
+
+    - id: "db_master_child_pattern"
+      name: "Master-Child Notebook Pattern"
+      description: "Create master notebooks that call child notebooks"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "db_code_reusability"
+      name: "Code Reusability"
+      description: "Identify opportunities for code reuse"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "db_folder_organization"
+      name: "Folder Organization"
+      description: "Organize notebooks and assets in project-specific folders"
+      severity: "LOW"
+      enabled: true
+
+    - id: "db_security_practices"
+      name: "Security Best Practices"
+      description: "Use Key Vault or Secret Scope for sensitive information"
+      severity: "CRITICAL"
+      enabled: true
+      validation_rules:
+        - forbidden_patterns:
+            - "dbutils\\.secrets\\.get\\([\"'][^\"']+[\"']\\s*,\\s*[\"'][^\"']+[\"']\\)"
+            - "password\\s*=\\s*[\"'][^\"']+[\"']"
+            - "token\\s*=\\s*[\"'][^\"']+[\"']"
+          message: "Potential hardcoded secrets detected"
+
+    - id: "db_logging"
+      name: "Logging Implementation"
+      description: "Implement appropriate logging levels (INFO, DEBUG, WARN, ERROR)"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "db_performance"
+      name: "Code Performance Optimization"
+      description: "Optimize partitioning, broadcasting, and cluster configuration"
+      severity: "HIGH"
+      enabled: true
+      performance_checks:
+        - "partition_strategy"
+        - "broadcast_joins"
+        - "data_shuffling"
+        - "cluster_sizing"
+
+    - id: "db_testing"
+      name: "Testing Coverage"
+      description: "Unit, integration, data quality, and performance testing"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "db_code_validation"
+      name: "Code Validation"
+      description: "Code must be tested and validated before check-in"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "db_git_integration"
+      name: "Git Integration"
+      description: "Notebooks integrated with Azure DevOps repo with proper branching"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "db_documentation"
+      name: "Code Documentation"
+      description: "Inline comments and documentation"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "db_library_installation"
+      name: "Library Installations"
+      description: "Verify library installations in production cluster"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "db_stress_testing"
+      name: "Stress Testing"
+      description: "Verify code can handle production data volumes"
+      severity: "HIGH"
+      enabled: true
+
+azure_sql:
+  display_name: "Azure SQL"
+  checkpoints:
+    - id: "sql_stored_procedures"
+      name: "Use Stored Procedures"
+      description: "Encapsulate logic in stored procedures"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "sql_constraints"
+      name: "Use Constraints"
+      description: "Implement primary keys and foreign keys"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "sql_schemas"
+      name: "Use Schemas"
+      description: "Organize database objects using schemas"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "sql_naming_convention"
+      name: "Aligned Naming Convention"
+      description: "Follow consistent naming standards"
+      severity: "MEDIUM"
+      enabled: true
+      validation_rules:
+        - pattern: "^[a-zA-Z][a-zA-Z0-9_]*$"
+          message: "SQL objects should start with letter and use alphanumeric/underscore"
+
+    - id: "sql_code_formatting"
+      name: "Code Formatting"
+      description: "Follow coding best practices and align styles"
+      severity: "LOW"
+      enabled: true
+
+    - id: "sql_logging"
+      name: "Logging Implementation"
+      description: "Implement logging in stored procedures"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "sql_version_control"
+      name: "Version Control"
+      description: "SQL scripts must be in version control"
+      severity: "HIGH"
+      enabled: true
+
+    - id: "sql_datatypes"
+      name: "Appropriate Data Types"
+      description: "Use recommended data types for columns"
+      severity: "MEDIUM"
+      enabled: true
+
+    - id: "sql_access_control"
+      name: "Access Control"
+      description: "Implement proper schema-level access control"
+      severity: "CRITICAL"
+      enabled: true
+
+# Global validation settings
+global_settings:
+  fail_on_critical: true
+  fail_on_high: false
+  skip_disabled_checks: true
+  parallel_validation: true
+  max_validation_time: 600  # seconds
+
+# Technology detection patterns
+technology_patterns:
+  azure_data_factory:
+    file_patterns:
+      - "datafactory/**/*.json"
+      - "adf/**/*.json"
+      - "**/pipeline*.json"
+      - "**/dataset*.json"
+      - "**/linkedservice*.json"
+
+  azure_databricks:
+    file_patterns:
+      - "databricks/**/*.py"
+      - "databricks/**/*.scala"
+      - "databricks/**/*.sql"
+      - "databricks/**/*.r"
+      - "**/notebook*.py"
+
+  azure_sql:
+    file_patterns:
+      - "**/*.sql"
+      - "sql/**/*"
+      - "**/stored_procedures/**"
+      - "**/tables/**"
+      - "**/views/**"
