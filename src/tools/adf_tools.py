@@ -12,15 +12,25 @@ settings = Settings()
 logger = setup_logger("tools.adf_tools")
 
 
-def ensure_file_list(files: Union[List[Any], str]) -> List[Dict[str, Any]]:
+def ensure_file_list(files: Union[List[Any], str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Ensure files parameter is a proper list of dictionaries
+    Ensure files parameter is a proper list of dictionaries with content
     """
-    # Handle string input (e.g., from agent passing incorrect format)
+    # If it's a single dict (from CrewAI), wrap it in a list
+    if isinstance(files, dict) and "files" in files:
+        files = files["files"]
+
+    # Handle string input
     if isinstance(files, str):
         # Try to parse as JSON
         try:
-            files = json.loads(files)
+            parsed = json.loads(files)
+            if isinstance(parsed, dict) and "files" in parsed:
+                files = parsed["files"]
+            elif isinstance(parsed, list):
+                files = parsed
+            else:
+                files = [parsed]
         except:
             # If not JSON, assume it's a single file path
             files = [{"path": files, "content": ""}]
@@ -29,12 +39,24 @@ def ensure_file_list(files: Union[List[Any], str]) -> List[Dict[str, Any]]:
     if not isinstance(files, list):
         files = [files]
 
-    # Convert each file to proper dict format
+    # Convert each file to proper dict format with content
     result = []
     for file in files:
         if isinstance(file, str):
-            result.append({"path": file, "content": ""})
+            # Try to parse string as JSON first
+            try:
+                file_dict = json.loads(file)
+                if isinstance(file_dict, dict):
+                    result.append({
+                        "path": file_dict.get("path", ""),
+                        "content": file_dict.get("content", "")
+                    })
+                else:
+                    result.append({"path": file, "content": ""})
+            except:
+                result.append({"path": file, "content": ""})
         elif isinstance(file, dict):
+            # Ensure we have both path and content
             result.append({
                 "path": file.get("path", ""),
                 "content": file.get("content", "")
@@ -47,7 +69,6 @@ def ensure_file_list(files: Union[List[Any], str]) -> List[Dict[str, Any]]:
             })
 
     return result
-
 
 @tool("check_adf_naming_convention")
 def check_adf_naming_convention_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:

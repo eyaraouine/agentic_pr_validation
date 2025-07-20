@@ -34,14 +34,28 @@ def format_files_for_task(files: List[Dict[str, Any]]) -> str:
     ])
 
 
+# src/crew/tasks.py - Fixed version
+
+from crewai import Task
+from typing import List, Dict, Any
+import json
+
+from src.utils.logger import setup_logger
+
+logger = setup_logger("crew.tasks")
+
+
 def create_validation_tasks(
         pr_id: str,
         files: List[Dict[str, Any]],
         agents: Dict[str, Any]
 ) -> List[Task]:
+    """
+    Create validation tasks for PR validation
+    """
     tasks = []
 
-    # Assure une structure propre
+    # Ensure files have proper structure
     files_with_content = []
     for file in files:
         file_data = {
@@ -52,23 +66,24 @@ def create_validation_tasks(
         }
         files_with_content.append(file_data)
 
-    # Séparer les fichiers par techno
+    # Separate files by technology
     adf_files = [f for f in files_with_content if f.get("type") == "adf"]
     databricks_files = [f for f in files_with_content if f.get("type") == "databricks"]
     sql_files = [f for f in files_with_content if f.get("type") == "sql"]
 
-    # Tâche 1 : Analyse initiale
-    files_summary = format_files_for_task(files_with_content)
+    # Task 1: File Analysis
     task_analyze_pr = Task(
         description=f"""
-Analyze pull request {{pr_id}} to understand the scope of changes.
+Analyze pull request {pr_id} to understand the scope of changes.
 
-Modified Files:
-{files_summary}
+Modified Files: {len(files)} files
+- ADF files: {len(adf_files)}
+- Databricks files: {len(databricks_files)}
+- SQL files: {len(sql_files)}
 
 Tasks to complete:
-1. Review all {len(files)} modified files
-2. Identify the technologies used (Azure Data Factory, Databricks, SQL)
+1. Review all modified files
+2. Identify the technologies used
 3. Categorize files by technology and change type
 4. Identify any potential security risks
 5. Prepare a comprehensive file analysis report
@@ -84,205 +99,147 @@ Expected output: A detailed analysis report containing:
     )
     tasks.append(task_analyze_pr)
 
-    # Tâche 2 : Validation ADF
+    # Task 2: ADF Validation
     if adf_files:
-        adf_file_paths = [f["path"] for f in adf_files]
-        adf_files_json = json.dumps(adf_files, indent=2).replace("{", "{{").replace("}", "}}")
-
+        # Store files data in task context instead of description
         task_validate_adf = Task(
             description=f"""
-    Validate {len(adf_files)} Azure Data Factory files.
-    
-    Files to validate:
-    {chr(10).join('- ' + path for path in adf_file_paths)}
-    
-    Instructions:
-    1. Use the check_adf_naming_convention tool to validate naming conventions
-    2. Use the check_adf_security tool to check for security issues
-    3. Use the check_adf_pipeline_pattern tool to verify pipeline patterns
-    4. Use the check_adf_parameterization tool to check parameterization
-    5. Use the check_adf_validation tool for general validation
-    6. Use the check_adf_error_handling tool to verify error handling
-    
-    Pass the following file list to each tool:
-    ```json
-    {adf_files_json}
-    Validate against all checkpoints:
-    
-    CRITICAL: Security, ADF Validation, Production Readiness, Error Handling
-    
-    HIGH: Naming Convention, No Impact, Parameterization, Performance, Testing
-    
-    MEDIUM/LOW: Pipeline Pattern, Reusability, Folder Organization, Logging
-    
-    For each checkpoint, document violations and provide remediation suggestions.
-    """,
-    expected_output="List of checkpoint results for ADF with pass/fail status and detailed suggestions",
-    agent=agents["adf_specialist"],
-    context=[task_analyze_pr]
-    )
-    tasks.append(task_validate_adf)
+Validate {len(adf_files)} Azure Data Factory files.
 
+Files to validate:
+{chr(10).join('- ' + f["path"] for f in adf_files)}
 
+Instructions:
+1. Use check_adf_naming_convention tool to validate naming conventions
+2. Use check_adf_security tool to check for security issues
+3. Use check_adf_pipeline_pattern tool to verify pipeline patterns
+4. Use check_adf_parameterization tool for parameterization
+5. Use check_adf_validation tool for general validation
+6. Use check_adf_error_handling tool for error handling
+
+IMPORTANT: Pass the actual file data to each tool, not just the paths.
+The files data is available in the task context.
+
+Validate against all checkpoints:
+CRITICAL: Security, ADF Validation, Production Readiness, Error Handling
+HIGH: Naming Convention, No Impact, Parameterization, Performance, Testing
+MEDIUM/LOW: Pipeline Pattern, Reusability, Folder Organization, Logging
+""",
+            expected_output="List of checkpoint results for ADF with pass/fail status",
+            agent=agents["adf_specialist"],
+            context=[task_analyze_pr],
+            # Add files data to task context
+            metadata={"files": adf_files}
+        )
+        tasks.append(task_validate_adf)
+
+    # Task 3: Databricks Validation
     if databricks_files:
-        databricks_file_paths = [f["path"] for f in databricks_files]
-        databricks_files_json = json.dumps(databricks_files, indent=2).replace("{", "{{").replace("}", "}}")
-
         task_validate_databricks = Task(
             description=f"""
-    Validate {len(databricks_files)} Azure Databricks files.
-    
-    Files to validate:
-    {chr(10).join('- ' + path for path in databricks_file_paths)}
-    
-    Instructions:
-    
-    Use check_databricks_naming tool for naming conventions
-    
-    Use check_databricks_security tool for security best practices
-    
-    Use check_databricks_performance tool for performance optimizations
-    
-    Use check_databricks_git_integration tool for Git practices
-    
-    Use check_databricks_testing tool for test coverage
-    
-    Use check_databricks_documentation tool for documentation
-    
-    Pass the following file list to each tool:
-    
-    json
-    Copier
-    Modifier
-    {databricks_files_json}
-    Validate against all checkpoints:
-    
-    CRITICAL: Security Best Practices
-    
-    HIGH: Naming, Performance, Git Integration, Testing, Validation
-    
-    MEDIUM/LOW: Pattern, Reusability, Logging, Documentation
-    
-    Check for performance optimizations, security issues, and best practices.
-    """,
-    expected_output="List of checkpoint results for Databricks with detailed performance suggestions",
-    agent=agents["databricks_specialist"],
-    context=[task_analyze_pr]
-    )
-    tasks.append(task_validate_databricks)
+Validate {len(databricks_files)} Azure Databricks files.
 
+Files to validate:
+{chr(10).join('- ' + f["path"] for f in databricks_files)}
 
-    # Tâche 4 : Validation SQL
+Instructions:
+1. Use check_databricks_naming tool for naming conventions
+2. Use check_databricks_security tool for security practices
+3. Use check_databricks_performance tool for performance
+4. Use check_databricks_git_integration tool for Git practices
+5. Use check_databricks_testing tool for test coverage
+6. Use check_databricks_documentation tool for documentation
+
+IMPORTANT: Pass the actual file data to each tool, not just the paths.
+The files data is available in the task context.
+
+Validate against all checkpoints:
+CRITICAL: Security Best Practices
+HIGH: Naming, Performance, Git Integration, Testing, Validation
+MEDIUM/LOW: Pattern, Reusability, Logging, Documentation
+""",
+            expected_output="List of checkpoint results for Databricks",
+            agent=agents["databricks_specialist"],
+            context=[task_analyze_pr],
+            metadata={"files": databricks_files}
+        )
+        tasks.append(task_validate_databricks)
+
+    # Task 4: SQL Validation
     if sql_files:
-        sql_file_paths = [f["path"] for f in sql_files]
-        sql_files_json = json.dumps(sql_files, indent=2).replace("{", "{{").replace("}", "}}")
-
         task_validate_sql = Task(
             description=f"""
-    Validate {len(sql_files)} Azure SQL files.
-    
-    Files to validate:
-    {chr(10).join('- ' + path for path in sql_file_paths)}
-    
-    Instructions:
-    
-    Use check_sql_stored_procedures tool for stored procedure usage
-    
-    Use check_sql_constraints tool for PK/FK constraints
-    
-    Use check_sql_schemas tool for schema organization
-    
-    Use check_sql_naming_convention tool for naming standards
-    
-    Use check_sql_security tool for security and access control
-    
-    Use check_sql_version_control tool for version control practices
-    
-    Pass the following file list to each tool:
-    
-    json
-    Copier
-    Modifier
-    {sql_files_json}
-    Validate against all checkpoints:
-    
-    CRITICAL: Access Control
-    
-    HIGH: Constraints, Version Control
-    
-    MEDIUM: Stored Procedures, Schemas, Naming, Data Types, Logging
-    
-    LOW: Code Formatting
-    
-    Check for security vulnerabilities and best practices.
-    """,
-    expected_output="List of checkpoint results for SQL with security and performance recommendations",
-    agent=agents["sql_specialist"],
-    context=[task_analyze_pr]
-    )
-    tasks.append(task_validate_sql)
+Validate {len(sql_files)} Azure SQL files.
 
+Files to validate:
+{chr(10).join('- ' + f["path"] for f in sql_files)}
 
-    # Tâche 5 : Rapport final
+Instructions:
+1. Use check_sql_stored_procedures tool for stored procedures
+2. Use check_sql_constraints tool for PK/FK constraints
+3. Use check_sql_schemas tool for schema organization
+4. Use check_sql_naming_convention tool for naming standards
+5. Use check_sql_security tool for security and access control
+6. Use check_sql_version_control tool for version control
+
+IMPORTANT: Pass the actual file data to each tool, not just the paths.
+The files data is available in the task context.
+
+Validate against all checkpoints:
+CRITICAL: Access Control
+HIGH: Constraints, Version Control
+MEDIUM: Stored Procedures, Schemas, Naming, Data Types, Logging
+LOW: Code Formatting
+""",
+            expected_output="List of checkpoint results for SQL",
+            agent=agents["sql_specialist"],
+            context=[task_analyze_pr],
+            metadata={"files": sql_files}
+        )
+        tasks.append(task_validate_sql)
+
+    # Task 5: Generate Report
     task_generate_report = Task(
         description=f"""
-    Generate a comprehensive validation report for PR {{pr_id}}.
-    
-    Based on all validation results from the previous tasks:
-    
-    Determine overall production readiness:
-    
-    READY if no CRITICAL violations
-    
-    NOT READY if any CRITICAL violations exist
-    
-    Create executive summary with:
-    
-    Total checkpoints evaluated
-    
-    Pass/fail counts by severity
-    
-    Key risks identified
-    
-    Overall recommendation
-    
-    Generate prioritized remediation plan:
-    
-    Group issues by severity (CRITICAL, HIGH, MEDIUM, LOW)
-    
-    Provide specific actions for each issue
-    
-    Estimate effort in hours for each severity level
-    
-    Format report for clarity:
-    
-    Use clear headings and sections
-    
-    Include actionable next steps
-    
-    Provide effort estimations
-    
-    The report should include:
-    
-    Overall status (READY/NOT READY)
-    
-    Issues count by severity
-    
-    Technologies validated
-    
-    Specific remediation steps
-    
-    Total effort estimation
-    """,
-    expected_output="Complete PRValidationReport with status, violations, suggestions, and remediation plan",
-    agent=agents["report_generator"],
-    context=tasks[1:] if len(tasks) > 1 else []
+Generate a comprehensive validation report for PR {pr_id}.
+
+Based on all validation results from the previous tasks:
+
+1. Determine overall production readiness:
+   - READY if no CRITICAL violations
+   - NOT READY if any CRITICAL violations exist
+
+2. Create executive summary with:
+   - Total checkpoints evaluated
+   - Pass/fail counts by severity
+   - Key risks identified
+   - Overall recommendation
+
+3. Generate prioritized remediation plan:
+   - Group issues by severity (CRITICAL, HIGH, MEDIUM, LOW)
+   - Provide specific actions for each issue
+   - Estimate effort in hours
+
+4. Format report for clarity:
+   - Use clear headings and sections
+   - Include actionable next steps
+   - Provide effort estimations
+
+The report should include:
+- Overall status (READY/NOT READY)
+- Issues count by severity
+- Technologies validated
+- Specific remediation steps
+- Total effort estimation
+""",
+        expected_output="Complete validation report with remediation plan",
+        agent=agents["report_generator"],
+        context=tasks[1:] if len(tasks) > 1 else []
     )
     tasks.append(task_generate_report)
 
     logger.info(f"Created {len(tasks)} validation tasks for PR {pr_id}")
     return tasks
-
 
 def create_remediation_task(
         pr_id: str,

@@ -1,0 +1,65 @@
+{
+  "pr_id": "TEST-20250720-214319",
+  "production_ready": true,
+  "technologies_detected": [
+    "Azure SQL",
+    "Azure Data Factory"
+  ],
+  "checkpoint_results": [
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure SQL",
+      "status": "FAIL",
+      "violations": [
+        "Validation issues detected"
+      ],
+      "suggestions": [
+        "Review and fix validation issues"
+      ],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "FAIL",
+      "violations": [
+        "Validation issues detected"
+      ],
+      "suggestions": [
+        "Review and fix validation issues"
+      ],
+      "severity": "HIGH"
+    }
+  ],
+  "overall_summary": "PR has passed all critical checkpoints but has 2 non-critical issues.",
+  "critical_issues_count": 0,
+  "remediation_plan": {
+    "immediate_actions": [],
+    "high_priority_actions": [
+      {
+        "technology": "Azure SQL",
+        "checkpoint": "Validation Check",
+        "actions": [
+          "Review and fix validation issues"
+        ]
+      },
+      {
+        "technology": "Azure Data Factory",
+        "checkpoint": "Validation Check",
+        "actions": [
+          "Review and fix validation issues"
+        ]
+      }
+    ],
+    "medium_priority_actions": [],
+    "low_priority_actions": [],
+    "estimated_effort": {
+      "CRITICAL": 0.0,
+      "HIGH": 3.0,
+      "MEDIUM": 0.0,
+      "LOW": 0.0
+    }
+  },
+  "validation_duration": 183.92673707008362,
+  "timestamp": "2025-07-20T19:46:25.042332"
+}
