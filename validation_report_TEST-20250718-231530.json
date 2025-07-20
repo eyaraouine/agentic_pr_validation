@@ -1,0 +1,168 @@
+{
+  "pr_id": "TEST-20250718-231530",
+  "production_ready": true,
+  "technologies_detected": [
+    "Azure Databricks",
+    "Azure Data Factory",
+    "Azure SQL"
+  ],
+  "checkpoint_results": [
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "FAIL",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Data Factory",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Databricks",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Databricks",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Databricks",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Databricks",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Databricks",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    },
+    {
+      "checkpoint_name": "Validation Check",
+      "technology": "Azure Databricks",
+      "status": "PASS",
+      "violations": [],
+      "suggestions": [],
+      "severity": "HIGH"
+    }
+  ],
+  "overall_summary": "PR has passed all critical checkpoints and is ready for production.",
+  "critical_issues_count": 0,
+  "remediation_plan": null,
+  "validation_duration": 257.71159267425537,
+  "timestamp": "2025-07-18T21:19:51.538886"
+}

@@ -1,7 +1,7 @@
-# Azure Data Factory Validation Tools
+# src/tools/adf_tools.py - Fixed version
 
 from crewai_tools import tool
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import json
 import re
 
@@ -12,13 +12,23 @@ settings = Settings()
 logger = setup_logger("tools.adf_tools")
 
 
+def ensure_file_dict(file_data: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Ensure file data is in dictionary format
+    """
+    if isinstance(file_data, str):
+        # If it's a string, assume it's just a file path
+        return {"path": file_data, "content": ""}
+    return file_data
+
+
 @tool("check_adf_naming_convention")
-def check_adf_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
+def check_adf_naming_convention_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:
     """
     Check ADF resource naming conventions
 
     Args:
-        files: List of ADF files to validate
+        files: List of ADF files to validate (can be dicts or strings)
 
     Returns:
         Validation results with violations and suggestions
@@ -27,6 +37,9 @@ def check_adf_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
 
     violations = []
     suggestions = []
+
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
 
     # Naming patterns for different ADF resources
     naming_patterns = {
@@ -37,35 +50,44 @@ def check_adf_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
         "trigger": r"^[a-z][a-z0-9_]*_trigger$"
     }
 
-    for file in files:
+    for file in files_dict:
+        file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
         try:
-            content = json.loads(file.get("content", "{}"))
-            resource_name = content.get("name", "")
-            resource_type = content.get("type", "").split("/")[-1].lower()
+            content_json = json.loads(content)
+            resource_name = content_json.get("name", "")
+            resource_type = content_json.get("type", "").split("/")[-1].lower()
 
             if resource_type in naming_patterns:
                 pattern = naming_patterns[resource_type]
                 if not re.match(pattern, resource_name):
                     violations.append(
-                        f"{file['path']}: Resource '{resource_name}' does not follow naming convention for {resource_type}"
+                        f"{file_path}: Resource '{resource_name}' does not follow naming convention for {resource_type}"
                     )
                     suggestions.append(
-                        f"{file['path']}: Rename '{resource_name}' to follow pattern '{pattern}' (e.g., 'customer_data_{resource_type}')"
+                        f"{file_path}: Rename '{resource_name}' to follow pattern '{pattern}' (e.g., 'customer_data_{resource_type}')"
                     )
 
             # Check length constraint
             if len(resource_name) > 140:
                 violations.append(
-                    f"{file['path']}: Resource name '{resource_name}' exceeds 140 characters"
+                    f"{file_path}: Resource name '{resource_name}' exceeds 140 characters"
                 )
                 suggestions.append(
-                    f"{file['path']}: Shorten the resource name to under 140 characters"
+                    f"{file_path}: Shorten the resource name to under 140 characters"
                 )
 
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse JSON for {file['path']}")
-            violations.append(f"{file['path']}: Invalid JSON format")
-            suggestions.append(f"{file['path']}: Fix JSON syntax errors")
+            logger.warning(f"Failed to parse JSON for {file_path}")
+            violations.append(f"{file_path}: Invalid JSON format")
+            suggestions.append(f"{file_path}: Fix JSON syntax errors")
+        except Exception as e:
+            logger.error(f"Error processing {file_path}: {str(e)}")
 
     return {
         "checkpoint": "ADF Naming Convention",
@@ -76,8 +98,77 @@ def check_adf_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
     }
 
 
+@tool("check_adf_security")
+def check_adf_security_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:
+    """
+    Check ADF security best practices
+    """
+    logger.info("Checking ADF security practices")
+
+    violations = []
+    suggestions = []
+
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    # Security patterns to detect
+    security_risks = [
+        (r'"password"\s*:\s*"[^"]*"', "Hardcoded password detected"),
+        (r'"accountKey"\s*:\s*"[^"]*"', "Hardcoded account key detected"),
+        (r'"connectionString"\s*:\s*"[^"]*Data Source', "Hardcoded connection string detected"),
+        (r'"sasToken"\s*:\s*"[^"]*"', "Hardcoded SAS token detected"),
+        (r'"clientSecret"\s*:\s*"[^"]*"', "Hardcoded client secret detected"),
+        (r'Password\s*=\s*[^;]+', "Password in connection string detected")
+    ]
+
+    for file in files_dict:
+        file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
+        # Check for hardcoded credentials
+        for pattern, risk_message in security_risks:
+            if re.search(pattern, content, re.IGNORECASE):
+                violations.append(f"{file_path}: {risk_message}")
+                suggestions.append(
+                    f"{file_path}: Use Azure Key Vault or Managed Service Identity (MSI) for authentication"
+                )
+
+        # Check for Key Vault or MSI usage
+        try:
+            content_json = json.loads(content)
+            if content_json.get("type") == "Microsoft.DataFactory/factories/linkedservices":
+                properties = content_json.get("properties", {})
+                type_properties = properties.get("typeProperties", {})
+
+                # Check if using secure authentication
+                auth_type = type_properties.get("authenticationType", "")
+                if auth_type not in ["ManagedServiceIdentity", "ServicePrincipal"]:
+                    if "keyvault" not in json.dumps(type_properties).lower():
+                        violations.append(
+                            f"{file_path}: Linked service not using MSI or Key Vault authentication"
+                        )
+                        suggestions.append(
+                            f"{file_path}: Configure MSI or Key Vault reference for secure authentication"
+                        )
+        except Exception as e:
+            logger.debug(f"Could not parse as linked service: {file_path}")
+
+    return {
+        "checkpoint": "Security Best Practices",
+        "status": "PASS" if not violations else "FAIL",
+        "violations": violations,
+        "suggestions": suggestions,
+        "severity": "CRITICAL"
+    }
+
+
+# Update other tools similarly...
 @tool("check_adf_pipeline_pattern")
-def check_adf_pipeline_pattern_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
+def check_adf_pipeline_pattern_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:
     """
     Check for single parent pipeline pattern implementation
     """
@@ -86,15 +177,22 @@ def check_adf_pipeline_pattern_tool(files: List[Dict[str, Any]]) -> Dict[str, An
     violations = []
     suggestions = []
 
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
     pipelines = []
-    for file in files:
+    for file in files_dict:
+        content = file.get("content", "")
+        if not content:
+            continue
+
         try:
-            content = json.loads(file.get("content", "{}"))
-            if content.get("type") == "Microsoft.DataFactory/factories/pipelines":
+            content_json = json.loads(content)
+            if content_json.get("type") == "Microsoft.DataFactory/factories/pipelines":
                 pipelines.append({
-                    "name": content.get("name"),
-                    "path": file["path"],
-                    "activities": content.get("properties", {}).get("activities", [])
+                    "name": content_json.get("name"),
+                    "path": file.get("path", ""),
+                    "activities": content_json.get("properties", {}).get("activities", [])
                 })
         except:
             pass
@@ -136,67 +234,8 @@ def check_adf_pipeline_pattern_tool(files: List[Dict[str, Any]]) -> Dict[str, An
     }
 
 
-@tool("check_adf_security")
-def check_adf_security_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Check ADF security best practices
-    """
-    logger.info("Checking ADF security practices")
-
-    violations = []
-    suggestions = []
-
-    # Security patterns to detect
-    security_risks = [
-        (r'"password"\s*:\s*"[^"]*"', "Hardcoded password detected"),
-        (r'"accountKey"\s*:\s*"[^"]*"', "Hardcoded account key detected"),
-        (r'"connectionString"\s*:\s*"[^"]*Data Source', "Hardcoded connection string detected"),
-        (r'"sasToken"\s*:\s*"[^"]*"', "Hardcoded SAS token detected"),
-        (r'"clientSecret"\s*:\s*"[^"]*"', "Hardcoded client secret detected")
-    ]
-
-    for file in files:
-        content = file.get("content", "")
-
-        # Check for hardcoded credentials
-        for pattern, risk_message in security_risks:
-            if re.search(pattern, content, re.IGNORECASE):
-                violations.append(f"{file['path']}: {risk_message}")
-                suggestions.append(
-                    f"{file['path']}: Use Azure Key Vault or Managed Service Identity (MSI) for authentication"
-                )
-
-        # Check for Key Vault or MSI usage
-        try:
-            content_json = json.loads(content)
-            if content_json.get("type") == "Microsoft.DataFactory/factories/linkedservices":
-                properties = content_json.get("properties", {})
-                type_properties = properties.get("typeProperties", {})
-
-                # Check if using secure authentication
-                auth_type = type_properties.get("authenticationType", "")
-                if auth_type not in ["ManagedServiceIdentity", "ServicePrincipal"]:
-                    if "keyvault" not in json.dumps(type_properties).lower():
-                        violations.append(
-                            f"{file['path']}: Linked service not using MSI or Key Vault authentication"
-                        )
-                        suggestions.append(
-                            f"{file['path']}: Configure MSI or Key Vault reference for secure authentication"
-                        )
-        except:
-            pass
-
-    return {
-        "checkpoint": "Security Best Practices",
-        "status": "PASS" if not violations else "FAIL",
-        "violations": violations,
-        "suggestions": suggestions,
-        "severity": "CRITICAL"
-    }
-
-
 @tool("check_adf_parameterization")
-def check_adf_parameterization_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
+def check_adf_parameterization_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:
     """
     Check if pipelines use proper parameterization for environment-specific values
     """
@@ -204,6 +243,9 @@ def check_adf_parameterization_tool(files: List[Dict[str, Any]]) -> Dict[str, An
 
     violations = []
     suggestions = []
+
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
 
     # Environment-specific patterns that should be parameterized
     env_patterns = [
@@ -215,9 +257,14 @@ def check_adf_parameterization_tool(files: List[Dict[str, Any]]) -> Dict[str, An
         (r'/subscriptions/[a-f0-9\-]+/', "Subscription ID")
     ]
 
-    for file in files:
+    for file in files_dict:
+        content = file.get("content", "")
+        file_path = file.get("path", "")
+
+        if not content:
+            continue
+
         try:
-            content = file.get("content", "")
             content_json = json.loads(content)
 
             # Check for hardcoded environment-specific values
@@ -226,10 +273,10 @@ def check_adf_parameterization_tool(files: List[Dict[str, Any]]) -> Dict[str, An
                     # Check if it's properly parameterized
                     if "@pipeline().globalParameters" not in content and "@dataset().parameters" not in content:
                         violations.append(
-                            f"{file['path']}: {description} should be parameterized"
+                            f"{file_path}: {description} should be parameterized"
                         )
                         suggestions.append(
-                            f"{file['path']}: Use global parameters or pipeline parameters for {description}"
+                            f"{file_path}: Use global parameters or pipeline parameters for {description}"
                         )
 
             # Check if pipeline has parameters defined
@@ -237,10 +284,10 @@ def check_adf_parameterization_tool(files: List[Dict[str, Any]]) -> Dict[str, An
                 parameters = content_json.get("properties", {}).get("parameters", {})
                 if not parameters and any(re.search(p[0], content) for p in env_patterns):
                     violations.append(
-                        f"{file['path']}: Pipeline contains environment-specific values but no parameters defined"
+                        f"{file_path}: Pipeline contains environment-specific values but no parameters defined"
                     )
                     suggestions.append(
-                        f"{file['path']}: Add parameters section to pipeline for environment-specific values"
+                        f"{file_path}: Add parameters section to pipeline for environment-specific values"
                     )
 
         except:
@@ -256,7 +303,7 @@ def check_adf_parameterization_tool(files: List[Dict[str, Any]]) -> Dict[str, An
 
 
 @tool("check_adf_validation")
-def check_adf_validation_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
+def check_adf_validation_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:
     """
     Check if ADF resources pass basic validation
     """
@@ -265,43 +312,53 @@ def check_adf_validation_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
+        content = file.get("content", "")
+        file_path = file.get("path", "")
+
+        if not content:
+            violations.append(f"{file_path}: No content provided for validation")
+            continue
+
         try:
-            content = json.loads(file.get("content", "{}"))
+            content_json = json.loads(content)
 
             # Basic structure validation
-            if "name" not in content:
-                violations.append(f"{file['path']}: Missing 'name' property")
-                suggestions.append(f"{file['path']}: Add a 'name' property to the resource")
+            if "name" not in content_json:
+                violations.append(f"{file_path}: Missing 'name' property")
+                suggestions.append(f"{file_path}: Add a 'name' property to the resource")
 
-            if "type" not in content:
-                violations.append(f"{file['path']}: Missing 'type' property")
-                suggestions.append(f"{file['path']}: Add a 'type' property to the resource")
+            if "type" not in content_json:
+                violations.append(f"{file_path}: Missing 'type' property")
+                suggestions.append(f"{file_path}: Add a 'type' property to the resource")
 
-            if "properties" not in content:
-                violations.append(f"{file['path']}: Missing 'properties' section")
-                suggestions.append(f"{file['path']}: Add a 'properties' section to the resource")
+            if "properties" not in content_json:
+                violations.append(f"{file_path}: Missing 'properties' section")
+                suggestions.append(f"{file_path}: Add a 'properties' section to the resource")
 
             # Pipeline-specific validation
-            if content.get("type") == "Microsoft.DataFactory/factories/pipelines":
-                activities = content.get("properties", {}).get("activities", [])
+            if content_json.get("type") == "Microsoft.DataFactory/factories/pipelines":
+                activities = content_json.get("properties", {}).get("activities", [])
                 if not activities:
-                    violations.append(f"{file['path']}: Pipeline has no activities")
-                    suggestions.append(f"{file['path']}: Add at least one activity to the pipeline")
+                    violations.append(f"{file_path}: Pipeline has no activities")
+                    suggestions.append(f"{file_path}: Add at least one activity to the pipeline")
 
-                # Check activity dependencies
-                for activity in activities:
+                # Check activity structure
+                for idx, activity in enumerate(activities):
                     if "name" not in activity:
-                        violations.append(f"{file['path']}: Activity missing 'name' property")
-                        suggestions.append(f"{file['path']}: Add name to all activities")
+                        violations.append(f"{file_path}: Activity {idx} missing 'name' property")
+                        suggestions.append(f"{file_path}: Add name to all activities")
 
                     if "type" not in activity:
-                        violations.append(f"{file['path']}: Activity missing 'type' property")
-                        suggestions.append(f"{file['path']}: Specify activity type")
+                        violations.append(f"{file_path}: Activity {idx} missing 'type' property")
+                        suggestions.append(f"{file_path}: Specify activity type")
 
         except json.JSONDecodeError:
-            violations.append(f"{file['path']}: Invalid JSON structure")
-            suggestions.append(f"{file['path']}: Validate JSON syntax using ADF validation")
+            violations.append(f"{file_path}: Invalid JSON structure")
+            suggestions.append(f"{file_path}: Validate JSON syntax using ADF validation")
 
     return {
         "checkpoint": "ADF Validation",
@@ -313,7 +370,7 @@ def check_adf_validation_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 @tool("check_adf_error_handling")
-def check_adf_error_handling_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
+def check_adf_error_handling_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:
     """
     Check error handling and failure alerts configuration
     """
@@ -322,12 +379,21 @@ def check_adf_error_handling_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]
     violations = []
     suggestions = []
 
-    for file in files:
-        try:
-            content = json.loads(file.get("content", "{}"))
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
 
-            if content.get("type") == "Microsoft.DataFactory/factories/pipelines":
-                properties = content.get("properties", {})
+    for file in files_dict:
+        content = file.get("content", "")
+        file_path = file.get("path", "")
+
+        if not content:
+            continue
+
+        try:
+            content_json = json.loads(content)
+
+            if content_json.get("type") == "Microsoft.DataFactory/factories/pipelines":
+                properties = content_json.get("properties", {})
                 activities = properties.get("activities", [])
 
                 # Check for error handling in activities
@@ -338,10 +404,10 @@ def check_adf_error_handling_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]
                     policy = activity.get("policy", {})
                     if "retry" not in policy:
                         violations.append(
-                            f"{file['path']}: Activity '{activity_name}' has no retry policy"
+                            f"{file_path}: Activity '{activity_name}' has no retry policy"
                         )
                         suggestions.append(
-                            f"{file['path']}: Add retry policy to activity '{activity_name}'"
+                            f"{file_path}: Add retry policy to activity '{activity_name}'"
                         )
 
                     # Check for failure dependencies
@@ -366,10 +432,10 @@ def check_adf_error_handling_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]
 
                         if not error_handlers:
                             violations.append(
-                                f"{file['path']}: No error handling for critical activity '{activity_name}'"
+                                f"{file_path}: No error handling for critical activity '{activity_name}'"
                             )
                             suggestions.append(
-                                f"{file['path']}: Add error handling activity with email notification for '{activity_name}'"
+                                f"{file_path}: Add error handling activity with email notification for '{activity_name}'"
                             )
 
                 # Check for email alerts
@@ -381,10 +447,10 @@ def check_adf_error_handling_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]
 
                 if not has_email_activity:
                     violations.append(
-                        f"{file['path']}: No email notification activity found for failures"
+                        f"{file_path}: No email notification activity found for failures"
                     )
                     suggestions.append(
-                        f"{file['path']}: Add Web activity to send email notifications on pipeline failures"
+                        f"{file_path}: Add Web activity to send email notifications on pipeline failures"
                     )
 
         except:

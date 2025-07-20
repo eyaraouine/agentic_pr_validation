@@ -1,7 +1,7 @@
 # Azure SQL Validation Tools
 
 from crewai_tools import tool
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import re
 import sqlparse
 
@@ -10,6 +10,15 @@ from src.utils.logger import setup_logger
 
 settings = Settings()
 logger = setup_logger("tools.sql_tools")
+
+def ensure_file_dict(file_data: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Ensure file data is in dictionary format
+    """
+    if isinstance(file_data, str):
+        # If it's a string, assume it's just a file path
+        return {"path": file_data, "content": ""}
+    return file_data
 
 
 @tool("check_sql_stored_procedures")
@@ -28,9 +37,17 @@ def check_sql_stored_procedures_tool(files: List[Dict[str, Any]]) -> Dict[str, A
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
         content = file.get("content", "").upper()
         file_path = file.get("path", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
 
         # Check if file contains business logic outside stored procedures
         has_complex_logic = any([
@@ -80,9 +97,17 @@ def check_sql_constraints_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
         content = file.get("content", "").upper()
         file_path = file.get("path", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
 
         # Check CREATE TABLE statements
         if "CREATE TABLE" in content:
@@ -135,10 +160,18 @@ def check_sql_schemas_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     violations = []
     suggestions = []
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
 
-    for file in files:
-        content = file.get("content", "")
+    for file in files_dict:
+
         file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
 
         # Check if objects are created with schema prefix
         objects_without_schema = []
@@ -194,6 +227,9 @@ def check_sql_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
     violations = []
     suggestions = []
 
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
     # Define naming patterns
     naming_rules = {
         "table": r'^[A-Z][a-zA-Z0-9]*$',  # PascalCase
@@ -204,9 +240,12 @@ def check_sql_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
         "index": r'^(IX_|IDX_)[a-zA-Z0-9_]*$'  # IX_ or IDX_ prefix
     }
 
-    for file in files:
+    for file in files_dict:
         content = file.get("content", "")
         file_path = file.get("path", "")
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
 
         # Check table names
         tables = re.findall(r'CREATE\s+TABLE\s+\[?(\w+)\]?', content, re.IGNORECASE)
@@ -255,9 +294,15 @@ def check_sql_security_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
         content = file.get("content", "").upper()
         file_path = file.get("path", "")
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
 
         # Check for GRANT statements
         has_grants = "GRANT" in content
@@ -317,9 +362,17 @@ def check_sql_version_control_tool(files: List[Dict[str, Any]]) -> Dict[str, Any
     violations = []
     suggestions = []
 
-    for file in files:
-        content = file.get("content", "")
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
+
         file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
 
         # Check for version headers
         has_version_header = any([

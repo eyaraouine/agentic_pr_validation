@@ -1,7 +1,8 @@
-# Task definitions for PR Validation Crew
+# src/crew/tasks.py - Updated version
 
 from crewai import Task
 from typing import List, Dict, Any
+import json
 
 from src.utils.logger import setup_logger
 
@@ -15,29 +16,37 @@ def create_validation_tasks(
 ) -> List[Task]:
     """
     Create validation tasks based on PR content
-
-    Args:
-        pr_id: Pull request identifier
-        files: List of modified files
-        agents: Dictionary of available agents
-
-    Returns:
-        List of CrewAI tasks for validation
     """
     tasks = []
+
+    # Ensure files have proper structure with content
+    files_with_content = []
+    for file in files:
+        file_data = {
+            "path": file.get("path", ""),
+            "type": file.get("type", "unknown"),
+            "change_type": file.get("change_type", "add"),
+            "content": file.get("content", "")
+        }
+        files_with_content.append(file_data)
+
+    # Convert files to JSON string for agent consumption - escape braces for format()
+    files_json = json.dumps(files_with_content, indent=2).replace('{', '{{').replace('}', '}}')
 
     # Task 1: Initial PR Analysis
     task_analyze_pr = Task(
         description=f"""
-        Analyze pull request {pr_id} to understand the scope of changes:
+        Analyze pull request {pr_id} to understand the scope of changes.
 
+        Files data:
+        {files_json}
+
+        Tasks:
         1. Review all {len(files)} modified files
         2. Identify the technologies used (Azure Data Factory, Databricks, SQL)
         3. Categorize files by technology and change type
-        4. Identify any potential security risks or large files
+        4. Identify any potential security risks
         5. Prepare a comprehensive file analysis report
-
-        Files to analyze: {len(files)}
 
         Expected output: A detailed analysis report containing:
         - Technologies detected
@@ -50,163 +59,105 @@ def create_validation_tasks(
     )
     tasks.append(task_analyze_pr)
 
-    # Conditional Task 2: ADF Validation
-    adf_files = [f for f in files if f.get("type") == "adf"]
+    # Separate files by technology for validation tasks
+    adf_files = [f for f in files_with_content if f.get("type") == "adf"]
+    databricks_files = [f for f in files_with_content if f.get("type") == "databricks"]
+    sql_files = [f for f in files_with_content if f.get("type") == "sql"]
+
+    # Task 2: ADF Validation
     if adf_files:
+        adf_files_json = json.dumps(adf_files, indent=2).replace('{', '{{').replace('}', '}}')
         task_validate_adf = Task(
             description=f"""
-            Validate {len(adf_files)} Azure Data Factory files against all checkpoints:
+            Validate {len(adf_files)} Azure Data Factory files.
 
-            CRITICAL Checkpoints (Must Pass):
-            - Security Best Practices: No hardcoded credentials, use Key Vault/MSI
-            - ADF Validation: Ensure all components pass ADF validation
-            - Production Environment Readiness: Verify connectivity in production
-            - Error Handling: Proper error handling and alert configuration
+            Files to validate:
+            {adf_files_json}
 
-            HIGH Priority Checkpoints:
-            - Naming Convention: Follow standard naming patterns
-            - No Other Resources Impacted: Ensure isolated changes
-            - Parameterization: Use global parameters for environment-specific values
-            - Code Performance: Verify acceptable processing times
-            - Test Coverage: All scenarios tested
+            Use the check_adf_* tools with this exact format for the files parameter.
 
-            MEDIUM/LOW Priority Checkpoints:
-            - Single Parent Pipeline Pattern
-            - Component Reusability
-            - Folder Organization
-            - Logging Implementation
+            Validate against all checkpoints:
+            - CRITICAL: Security, ADF Validation, Production Readiness, Error Handling
+            - HIGH: Naming Convention, No Impact, Parameterization, Performance, Testing
+            - MEDIUM/LOW: Pipeline Pattern, Reusability, Folder Organization, Logging
 
-            For each checkpoint:
-            1. Analyze the file content thoroughly
-            2. Check against validation rules
-            3. Document any violations with specific file and line references
-            4. Provide actionable remediation suggestions
-
-            Files to validate: {[f['path'] for f in adf_files]}
+            For each checkpoint, document violations and provide remediation suggestions.
             """,
             expected_output="List of checkpoint results for ADF with pass/fail status and detailed suggestions",
             agent=agents["adf_specialist"]
         )
         tasks.append(task_validate_adf)
 
-    # Conditional Task 3: Databricks Validation
-    databricks_files = [f for f in files if f.get("type") == "databricks"]
+    # Task 3: Databricks Validation
     if databricks_files:
+        databricks_files_json = json.dumps(databricks_files, indent=2).replace('{', '{{').replace('}', '}}')
         task_validate_databricks = Task(
             description=f"""
-            Validate {len(databricks_files)} Azure Databricks files against all checkpoints:
+            Validate {len(databricks_files)} Azure Databricks files.
 
-            CRITICAL Checkpoints (Must Pass):
-            - Security Best Practices: No hardcoded secrets, use Secret Scope/Key Vault
+            Files to validate:
+            {databricks_files_json}
 
-            HIGH Priority Checkpoints:
-            - Naming Conventions: Follow project standards
-            - Code Performance: Optimize for Spark execution
-            - Git Integration: Proper branching and PR workflow
-            - Library Installations: Verify production cluster compatibility
-            - Stress Testing: Handle production data volumes
-            - Code Validation: Tested before check-in
+            Use the check_databricks_* tools with this exact format for the files parameter.
 
-            MEDIUM Priority Checkpoints:
-            - Master-Child Notebook Pattern
-            - Code Reusability
-            - Logging Implementation
-            - Documentation
+            Validate against all checkpoints:
+            - CRITICAL: Security Best Practices
+            - HIGH: Naming, Performance, Git Integration, Testing, Validation
+            - MEDIUM/LOW: Pattern, Reusability, Logging, Documentation
 
-            LOW Priority Checkpoints:
-            - Folder Organization
-
-            Performance Optimization Areas to Check:
-            - Partitioning strategies
-            - Broadcast join usage
-            - Data shuffling minimization
-            - Cluster configuration appropriateness
-
-            For each checkpoint:
-            1. Analyze notebook/code structure
-            2. Identify violations with specific examples
-            3. Suggest concrete improvements
-            4. Consider Spark/Databricks best practices
-
-            Files to validate: {[f['path'] for f in databricks_files]}
+            Check for performance optimizations, security issues, and best practices.
             """,
             expected_output="List of checkpoint results for Databricks with detailed performance suggestions",
             agent=agents["databricks_specialist"]
         )
         tasks.append(task_validate_databricks)
 
-    # Conditional Task 4: SQL Validation
-    sql_files = [f for f in files if f.get("type") == "sql"]
+    # Task 4: SQL Validation
     if sql_files:
+        sql_files_json = json.dumps(sql_files, indent=2).replace('{', '{{').replace('}', '}}')
         task_validate_sql = Task(
             description=f"""
-            Validate {len(sql_files)} Azure SQL files against all checkpoints:
+            Validate {len(sql_files)} Azure SQL files.
 
-            CRITICAL Checkpoints (Must Pass):
-            - Access Control: Proper schema-level permissions
+            Files to validate:
+            {sql_files_json}
 
-            HIGH Priority Checkpoints:
-            - Use Constraints: Primary and foreign keys defined
-            - Version Control: All SQL scripts in Git
+            Use the check_sql_* tools with this exact format for the files parameter.
 
-            MEDIUM Priority Checkpoints:
-            - Use Stored Procedures: Logic encapsulation
-            - Use Schemas: Organized database structure
-            - Naming Convention: Consistent naming standards
-            - Data Types: Appropriate type selection
-            - Logging: Implement in stored procedures
+            Validate against all checkpoints:
+            - CRITICAL: Access Control
+            - HIGH: Constraints, Version Control
+            - MEDIUM: Stored Procedures, Schemas, Naming, Data Types, Logging
+            - LOW: Code Formatting
 
-            LOW Priority Checkpoints:
-            - Code Formatting: Consistent style
-
-            For each checkpoint:
-            1. Parse SQL statements and structure
-            2. Verify best practices compliance
-            3. Check for security vulnerabilities
-            4. Suggest improvements for maintainability
-
-            Files to validate: {[f['path'] for f in sql_files]}
+            Check for security vulnerabilities and best practices.
             """,
             expected_output="List of checkpoint results for SQL with security and performance recommendations",
             agent=agents["sql_specialist"]
         )
         tasks.append(task_validate_sql)
 
-    # Task 5: Generate Comprehensive Report
+    # Task 5: Generate Report
     task_generate_report = Task(
         description=f"""
-        Generate a comprehensive validation report for PR {pr_id}:
+        Generate a comprehensive validation report for PR {pr_id}.
 
-        1. Compile all validation results from technology specialists
-        2. Determine overall production readiness:
-           - READY: No CRITICAL violations
-           - NOT READY: One or more CRITICAL violations
+        Compile all validation results and:
+        1. Determine overall production readiness (READY if no CRITICAL violations)
+        2. Create executive summary with key metrics
+        3. Generate prioritized remediation plan with effort estimation
+        4. Format report for clarity and actionability
 
-        3. Create an executive summary that includes:
-           - Overall status (ready/not ready)
-           - Number of issues by severity
-           - Technologies validated
-           - Key risks or concerns
-
-        4. Generate a prioritized remediation plan:
-           - Group violations by severity (CRITICAL → HIGH → MEDIUM → LOW)
-           - Provide specific, actionable steps for each violation
-           - Estimate effort in hours for each severity level
-           - Suggest order of fixes
-
-        5. Format the report for both human reading and automated processing
-
-        6. Include metrics:
-           - Total checkpoints evaluated
-           - Pass/fail ratio by technology
-           - Estimated total remediation effort
-
-        The report should be clear, actionable, and help developers quickly understand
-        what needs to be fixed before the PR can be merged to production.
+        Include:
+        - Overall status
+        - Issues by severity
+        - Technologies validated
+        - Remediation steps
+        - Effort estimation
         """,
         expected_output="Complete PRValidationReport with status, violations, suggestions, and remediation plan",
         agent=agents["report_generator"],
-        context=[task_analyze_pr] + [t for t in tasks if t != task_analyze_pr]  # Include all previous tasks as context
+        context=tasks[1:] if len(tasks) > 1 else []
     )
     tasks.append(task_generate_report)
 
@@ -247,7 +198,7 @@ def create_remediation_task(
         5. Estimate time to fix
 
         Critical issues to address:
-        {critical_issues}
+        {json.dumps(critical_issues, indent=2).replace('{', '{{').replace('}', '}}')}
 
         The plan should be immediately actionable by developers.
         """,

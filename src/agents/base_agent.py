@@ -1,4 +1,4 @@
-# Base Agent Implementation
+# src/agents/base_agent.py - Simplified version
 
 from crewai import Agent
 from typing import List, Optional, Any, Dict
@@ -32,8 +32,6 @@ class BaseSpecialistAgent(ABC):
         """Create and configure the CrewAI agent"""
         tools = self.get_tools()
 
-        # CrewAI v0.22.5 uses environment variables for LLM configuration
-        # No need to pass llm_config directly
         agent = Agent(
             role=self.role,
             goal=self.goal,
@@ -54,17 +52,10 @@ def create_pr_validation_manager() -> Agent:
     """
     Create the PR Validation Manager agent
     """
-    # CrewAI v0.22.5 uses environment variables for LLM configuration
-    # Azure OpenAI is already configured via environment variables
     return Agent(
         role='PR Validation Manager',
         goal='Coordinate comprehensive validation of pull requests to ensure production readiness',
-        backstory="""You are an experienced DevOps and Release Manager with over 15 years 
-        of experience in enterprise software delivery. You have deep expertise in Azure 
-        cloud services, CI/CD pipelines, and production deployment best practices. Your 
-        role is to orchestrate the validation team, ensuring all checkpoints are thoroughly 
-        verified according to company standards. You make the final decision on whether 
-        a PR is production-ready based on the findings of your specialist team members.""",
+        backstory='You are an experienced DevOps and Release Manager with over 15 years of experience in enterprise software delivery. You have deep expertise in Azure cloud services, CI/CD pipelines, and production deployment best practices. Your role is to orchestrate the validation team, ensuring all checkpoints are thoroughly verified according to company standards. You make the final decision on whether a PR is production-ready based on the findings of your specialist team members.',
         verbose=settings.CREW_VERBOSE,
         llm=get_llm_instance(),
         allow_delegation=True,

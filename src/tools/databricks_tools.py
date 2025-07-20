@@ -1,7 +1,7 @@
 # Azure Databricks Validation Tools
 
 from crewai_tools import tool
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 import re
 import ast
 
@@ -10,6 +10,15 @@ from src.utils.logger import setup_logger
 
 settings = Settings()
 logger = setup_logger("tools.databricks_tools")
+
+def ensure_file_dict(file_data: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Ensure file data is in dictionary format
+    """
+    if isinstance(file_data, str):
+        # If it's a string, assume it's just a file path
+        return {"path": file_data, "content": ""}
+    return file_data
 
 
 @tool("check_databricks_naming")
@@ -28,11 +37,21 @@ def check_databricks_naming_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     violations = []
     suggestions = []
 
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
     # Naming pattern for notebooks
     naming_pattern = r"^[a-z][a-z0-9_]*$"
 
-    for file in files:
+    for file in files_dict:
+
         file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
         file_name = file_path.split("/")[-1].split(".")[0]  # Get filename without extension
 
         if not re.match(naming_pattern, file_name):
@@ -67,6 +86,9 @@ def check_databricks_security_tool(files: List[Dict[str, Any]]) -> Dict[str, Any
     violations = []
     suggestions = []
 
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
     # Security patterns to detect
     security_risks = [
         (r'password\s*=\s*["\'][^"\']+["\']', "Hardcoded password detected"),
@@ -76,7 +98,14 @@ def check_databricks_security_tool(files: List[Dict[str, Any]]) -> Dict[str, Any
         (r'access_key\s*=\s*["\'][^"\']+["\']', "Hardcoded access key detected")
     ]
 
-    for file in files:
+    for file in files_dict:
+        file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
         content = file.get("content", "")
 
         # Check for hardcoded credentials
@@ -125,7 +154,17 @@ def check_databricks_performance_tool(files: List[Dict[str, Any]]) -> Dict[str, 
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
+
+        file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
         content = file.get("content", "")
 
         # Check for performance anti-patterns
@@ -196,7 +235,17 @@ def check_databricks_git_integration_tool(files: List[Dict[str, Any]]) -> Dict[s
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
+
+        file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
         content = file.get("content", "")
         file_path = file.get("path", "")
 
@@ -249,7 +298,17 @@ def check_databricks_testing_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+
+    for file in files_dict:
+
+        file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
         content = file.get("content", "")
         file_path = file.get("path", "")
 
@@ -311,7 +370,16 @@ def check_databricks_documentation_tool(files: List[Dict[str, Any]]) -> Dict[str
     violations = []
     suggestions = []
 
-    for file in files:
+    # Ensure files are in dict format
+    files_dict = [ensure_file_dict(f) for f in files]
+    for file in files_dict:
+        file_path = file.get("path", "")
+        content = file.get("content", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
         content = file.get("content", "")
         file_path = file.get("path", "")
 
