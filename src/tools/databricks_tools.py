@@ -11,14 +11,41 @@ from src.utils.logger import setup_logger
 settings = Settings()
 logger = setup_logger("tools.databricks_tools")
 
-def ensure_file_dict(file_data: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+def ensure_file_list(files: Union[List[Any], str]) -> List[Dict[str, Any]]:
     """
-    Ensure file data is in dictionary format
+    Ensure files parameter is a proper list of dictionaries
     """
-    if isinstance(file_data, str):
-        # If it's a string, assume it's just a file path
-        return {"path": file_data, "content": ""}
-    return file_data
+    # Handle string input (e.g., from agent passing incorrect format)
+    if isinstance(files, str):
+        # Try to parse as JSON
+        try:
+            files = json.loads(files)
+        except:
+            # If not JSON, assume it's a single file path
+            files = [{"path": files, "content": ""}]
+
+    # Ensure it's a list
+    if not isinstance(files, list):
+        files = [files]
+
+    # Convert each file to proper dict format
+    result = []
+    for file in files:
+        if isinstance(file, str):
+            result.append({"path": file, "content": ""})
+        elif isinstance(file, dict):
+            result.append({
+                "path": file.get("path", ""),
+                "content": file.get("content", "")
+            })
+        else:
+            # Try to extract attributes from object
+            result.append({
+                "path": getattr(file, "path", ""),
+                "content": getattr(file, "content", "")
+            })
+
+    return result
 
 
 @tool("check_databricks_naming")
@@ -34,16 +61,17 @@ def check_databricks_naming_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     logger.info(f"Checking naming conventions for {len(files)} Databricks files")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
-
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
 
     # Naming pattern for notebooks
     naming_pattern = r"^[a-z][a-z0-9_]*$"
 
-    for file in files_dict:
+    for file in files_list:
 
         file_path = file.get("path", "")
         content = file.get("content", "")
@@ -83,11 +111,12 @@ def check_databricks_security_tool(files: List[Dict[str, Any]]) -> Dict[str, Any
     """
     logger.info("Checking Databricks security practices")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
-
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
 
     # Security patterns to detect
     security_risks = [
@@ -98,7 +127,7 @@ def check_databricks_security_tool(files: List[Dict[str, Any]]) -> Dict[str, Any
         (r'access_key\s*=\s*["\'][^"\']+["\']', "Hardcoded access key detected")
     ]
 
-    for file in files_dict:
+    for file in files_list:
         file_path = file.get("path", "")
         content = file.get("content", "")
 
@@ -151,13 +180,14 @@ def check_databricks_performance_tool(files: List[Dict[str, Any]]) -> Dict[str, 
     """
     logger.info("Checking Databricks performance optimizations")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-
-    for file in files_dict:
+    for file in files_list:
 
         file_path = file.get("path", "")
         content = file.get("content", "")
@@ -232,13 +262,14 @@ def check_databricks_git_integration_tool(files: List[Dict[str, Any]]) -> Dict[s
     """
     logger.info("Checking Databricks Git integration")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-
-    for file in files_dict:
+    for file in files_list:
 
         file_path = file.get("path", "")
         content = file.get("content", "")
@@ -295,13 +326,14 @@ def check_databricks_testing_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]
     """
     logger.info("Checking Databricks testing practices")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-
-    for file in files_dict:
+    for file in files_list:
 
         file_path = file.get("path", "")
         content = file.get("content", "")
@@ -367,12 +399,14 @@ def check_databricks_documentation_tool(files: List[Dict[str, Any]]) -> Dict[str
     """
     logger.info("Checking Databricks documentation")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-    for file in files_dict:
+    for file in files_list:
         file_path = file.get("path", "")
         content = file.get("content", "")
 

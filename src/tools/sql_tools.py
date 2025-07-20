@@ -11,14 +11,41 @@ from src.utils.logger import setup_logger
 settings = Settings()
 logger = setup_logger("tools.sql_tools")
 
-def ensure_file_dict(file_data: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+def ensure_file_list(files: Union[List[Any], str]) -> List[Dict[str, Any]]:
     """
-    Ensure file data is in dictionary format
+    Ensure files parameter is a proper list of dictionaries
     """
-    if isinstance(file_data, str):
-        # If it's a string, assume it's just a file path
-        return {"path": file_data, "content": ""}
-    return file_data
+    # Handle string input (e.g., from agent passing incorrect format)
+    if isinstance(files, str):
+        # Try to parse as JSON
+        try:
+            files = json.loads(files)
+        except:
+            # If not JSON, assume it's a single file path
+            files = [{"path": files, "content": ""}]
+
+    # Ensure it's a list
+    if not isinstance(files, list):
+        files = [files]
+
+    # Convert each file to proper dict format
+    result = []
+    for file in files:
+        if isinstance(file, str):
+            result.append({"path": file, "content": ""})
+        elif isinstance(file, dict):
+            result.append({
+                "path": file.get("path", ""),
+                "content": file.get("content", "")
+            })
+        else:
+            # Try to extract attributes from object
+            result.append({
+                "path": getattr(file, "path", ""),
+                "content": getattr(file, "content", "")
+            })
+
+    return result
 
 
 @tool("check_sql_stored_procedures")
@@ -34,13 +61,14 @@ def check_sql_stored_procedures_tool(files: List[Dict[str, Any]]) -> Dict[str, A
     """
     logger.info(f"Checking stored procedures for {len(files)} SQL files")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-
-    for file in files_dict:
+    for file in files_list:
         content = file.get("content", "").upper()
         file_path = file.get("path", "")
 
@@ -94,13 +122,14 @@ def check_sql_constraints_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     logger.info("Checking SQL constraints")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-
-    for file in files_dict:
+    for file in files_list:
         content = file.get("content", "").upper()
         file_path = file.get("path", "")
 
@@ -158,12 +187,14 @@ def check_sql_schemas_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     logger.info("Checking SQL schema organization")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
 
-    for file in files_dict:
+    for file in files_list:
 
         file_path = file.get("path", "")
         content = file.get("content", "")
@@ -224,11 +255,12 @@ def check_sql_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
     """
     logger.info("Checking SQL naming conventions")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
-
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
 
     # Define naming patterns
     naming_rules = {
@@ -240,7 +272,7 @@ def check_sql_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
         "index": r'^(IX_|IDX_)[a-zA-Z0-9_]*$'  # IX_ or IDX_ prefix
     }
 
-    for file in files_dict:
+    for file in files_list:
         content = file.get("content", "")
         file_path = file.get("path", "")
         if not content:
@@ -291,13 +323,14 @@ def check_sql_security_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     logger.info("Checking SQL security practices")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-
-    for file in files_dict:
+    for file in files_list:
         content = file.get("content", "").upper()
         file_path = file.get("path", "")
         if not content:
@@ -359,13 +392,14 @@ def check_sql_version_control_tool(files: List[Dict[str, Any]]) -> Dict[str, Any
     """
     logger.info("Checking SQL version control practices")
 
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
     violations = []
     suggestions = []
 
-    # Ensure files are in dict format
-    files_dict = [ensure_file_dict(f) for f in files]
-
-    for file in files_dict:
+    for file in files_list:
 
         file_path = file.get("path", "")
         content = file.get("content", "")

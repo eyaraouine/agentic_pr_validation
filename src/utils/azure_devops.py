@@ -1,4 +1,4 @@
-# Azure DevOps Client Utilities
+# src/utils/azure_devops.py - Version améliorée
 
 import aiohttp
 import asyncio
@@ -32,19 +32,53 @@ class AzureDevOpsClient:
         self.repository = repository
         self.pat = pat
 
-        # Setup authentication
+        # Setup authentication - fix the base64 encoding
+        auth_string = f":{pat}"
+        encoded_auth = base64.b64encode(auth_string.encode()).decode('ascii')
         self.headers = {
-            'Authorization': f'Basic {base64.b64encode(f":{pat}".encode()).decode()}',
-            'Content-Type': 'application/json'
+            'Authorization': f'Basic {encoded_auth}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         }
 
         # Extract organization name from URL
-        self.organization = self.organization_url.split('/')[-1]
+        if "dev.azure.com" in self.organization_url:
+            # New URL format: https://dev.azure.com/organization
+            parts = self.organization_url.split('/')
+            self.organization = parts[-1] if parts else "unknown"
+        else:
+            # Old URL format: https://organization.visualstudio.com
+            self.organization = self.organization_url.split('//')[1].split('.')[0]
 
         # API base URL
         self.api_base = f"https://dev.azure.com/{self.organization}/{self.project}/_apis"
 
         logger.info(f"Initialized Azure DevOps client for {self.organization}/{self.project}")
+
+    async def test_connection(self) -> bool:
+        """
+        Test if the connection and authentication work
+
+        Returns:
+            True if connection successful
+        """
+        try:
+            url = f"{self.api_base}/git/repositories/{self.repository}"
+            params = {'api-version': '7.0'}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=self.headers, params=params) as response:
+                    if response.status == 200:
+                        logger.info("Azure DevOps connection test successful")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Connection test failed: {response.status} - {error_text}")
+                        return False
+
+        except Exception as e:
+            logger.error(f"Connection test error: {str(e)}")
+            return False
 
     async def get_file_content(self, file_path: str, branch: str) -> str:
         """
@@ -58,30 +92,95 @@ class AzureDevOpsClient:
             File content as string
         """
         try:
-            # Remove leading slash if present
-            file_path = file_path.lstrip('/')
+            # Remove leading slash and clean path
+            file_path = file_path.lstrip('/').replace('//', '/')
 
-            # Construct API URL
+            # Clean branch name (remove refs/heads/ if present)
+            branch_name = branch.replace('refs/heads/', '')
+
+            # Try different API endpoints
+            # Method 1: Items API
             url = f"{self.api_base}/git/repositories/{self.repository}/items"
             params = {
-                'path': file_path,
-                'versionDescriptor.version': branch.replace('refs/heads/', ''),
+                'path': f"/{file_path}",  # Add leading slash for API
+                'versionDescriptor.version': branch_name,
+                'versionDescriptor.versionType': 'branch',
+                '$format': 'text',  # Get raw content
                 'api-version': '7.0'
             }
+
+            logger.debug(f"Fetching file: {file_path} from branch: {branch_name}")
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=self.headers, params=params) as response:
                     if response.status == 200:
                         content = await response.text()
-                        logger.info(f"Successfully fetched content for {file_path}")
+                        logger.info(f"Successfully fetched {len(content)} bytes for {file_path}")
                         return content
+                    elif response.status == 404:
+                        logger.warning(f"File not found: {file_path} in branch {branch_name}")
+                        # Try alternate method
+                        return await self._get_file_content_alternate(file_path, branch_name)
                     else:
                         error_text = await response.text()
                         logger.error(f"Failed to fetch {file_path}: {response.status} - {error_text}")
+
+                        # If authentication error, provide helpful message
+                        if response.status == 401:
+                            logger.error(
+                                "Authentication failed. Please check your PAT token has Code (read) permission")
+
                         return ""
 
         except Exception as e:
             logger.error(f"Error fetching file content for {file_path}: {str(e)}")
+            return ""
+
+    async def _get_file_content_alternate(self, file_path: str, branch: str) -> str:
+        """
+        Alternative method to get file content using commits API
+        """
+        try:
+            # Get latest commit on branch
+            url = f"{self.api_base}/git/repositories/{self.repository}/commits"
+            params = {
+                'searchCriteria.itemVersion.version': branch,
+                'searchCriteria.itemVersion.versionType': 'branch',
+                '$top': 1,
+                'api-version': '7.0'
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=self.headers, params=params) as response:
+                    if response.status != 200:
+                        return ""
+
+                    data = await response.json()
+                    if not data.get('value'):
+                        return ""
+
+                    commit_id = data['value'][0]['commitId']
+
+                    # Get file from commit
+                    file_url = f"{self.api_base}/git/repositories/{self.repository}/items"
+                    file_params = {
+                        'path': f"/{file_path}",
+                        'versionDescriptor.version': commit_id,
+                        'versionDescriptor.versionType': 'commit',
+                        '$format': 'text',
+                        'api-version': '7.0'
+                    }
+
+                    async with session.get(file_url, headers=self.headers, params=file_params) as file_response:
+                        if file_response.status == 200:
+                            content = await file_response.text()
+                            logger.info(f"Successfully fetched {file_path} using alternate method")
+                            return content
+
+            return ""
+
+        except Exception as e:
+            logger.error(f"Alternate fetch method failed: {str(e)}")
             return ""
 
     async def get_pr_details(self, pr_id: str) -> Dict[str, Any]:
@@ -95,7 +194,10 @@ class AzureDevOpsClient:
             PR details dictionary
         """
         try:
-            url = f"{self.api_base}/git/repositories/{self.repository}/pullrequests/{pr_id}"
+            # Handle both numeric and string PR IDs
+            pr_id_numeric = pr_id.split('-')[-1] if '-' in pr_id else pr_id
+
+            url = f"{self.api_base}/git/repositories/{self.repository}/pullrequests/{pr_id_numeric}"
             params = {'api-version': '7.0'}
 
             async with aiohttp.ClientSession() as session:
@@ -124,19 +226,24 @@ class AzureDevOpsClient:
             List of modified files
         """
         try:
+            # Handle both numeric and string PR IDs
+            pr_id_numeric = pr_id.split('-')[-1] if '-' in pr_id else pr_id
+
             # Get PR iterations
-            url = f"{self.api_base}/git/repositories/{self.repository}/pullrequests/{pr_id}/iterations"
+            url = f"{self.api_base}/git/repositories/{self.repository}/pullrequests/{pr_id_numeric}/iterations"
             params = {'api-version': '7.0'}
 
             async with aiohttp.ClientSession() as session:
                 # Get iterations
                 async with session.get(url, headers=self.headers, params=params) as response:
                     if response.status != 200:
-                        logger.error(f"Failed to get PR iterations: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"Failed to get PR iterations: {response.status} - {error_text}")
                         return []
 
                     iterations = await response.json()
                     if not iterations.get('value'):
+                        logger.warning(f"No iterations found for PR {pr_id}")
                         return []
 
                     # Get latest iteration
@@ -146,7 +253,8 @@ class AzureDevOpsClient:
                 changes_url = f"{url}/{latest_iteration}/changes"
                 async with session.get(changes_url, headers=self.headers, params=params) as response:
                     if response.status != 200:
-                        logger.error(f"Failed to get PR changes: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"Failed to get PR changes: {response.status} - {error_text}")
                         return []
 
                     changes = await response.json()
@@ -154,9 +262,24 @@ class AzureDevOpsClient:
                     # Format file list
                     files = []
                     for change in changes.get('changeEntries', []):
+                        change_type_map = {
+                            1: 'add',  # Add
+                            2: 'edit',  # Edit
+                            4: 'rename',  # Rename
+                            8: 'delete',  # Delete
+                            16: 'undelete',  # Undelete
+                            32: 'branch',  # Branch
+                            64: 'merge',  # Merge
+                            128: 'lock',  # Lock
+                            256: 'property'  # Property
+                        }
+
+                        change_type_value = change.get('changeType', 2)
+                        change_type = change_type_map.get(change_type_value, 'edit')
+
                         files.append({
                             'path': change.get('item', {}).get('path', ''),
-                            'changeType': change.get('changeType', 'edit').lower(),
+                            'changeType': change_type,
                             'item': change.get('item', {})
                         })
 
@@ -179,7 +302,10 @@ class AzureDevOpsClient:
             Success status
         """
         try:
-            url = f"{self.api_base}/git/repositories/{self.repository}/pullrequests/{pr_id}/threads"
+            # Handle both numeric and string PR IDs
+            pr_id_numeric = pr_id.split('-')[-1] if '-' in pr_id else pr_id
+
+            url = f"{self.api_base}/git/repositories/{self.repository}/pullrequests/{pr_id_numeric}/threads"
             params = {'api-version': '7.0'}
 
             # Create comment thread
@@ -222,9 +348,13 @@ class AzureDevOpsClient:
             Success status
         """
         try:
+            # Handle both numeric and string PR IDs
+            pr_id_numeric = pr_id.split('-')[-1] if '-' in pr_id else pr_id
+
             # First get PR details to get the last commit ID
             pr_details = await self.get_pr_details(pr_id)
             if not pr_details:
+                logger.error("Could not get PR details for status update")
                 return False
 
             commit_id = pr_details.get('lastMergeSourceCommit', {}).get('commitId')
@@ -239,7 +369,7 @@ class AzureDevOpsClient:
             data = {
                 "state": status,
                 "description": description[:140],  # Max 140 characters
-                "targetUrl": f"{self.organization_url}/{self.project}/_git/{self.repository}/pullrequest/{pr_id}",
+                "targetUrl": f"{self.organization_url}/{self.project}/_git/{self.repository}/pullrequest/{pr_id_numeric}",
                 "context": {
                     "name": context,
                     "genre": "continuous-integration"
@@ -258,115 +388,4 @@ class AzureDevOpsClient:
 
         except Exception as e:
             logger.error(f"Error updating PR {pr_id} status: {str(e)}")
-            return False
-
-    async def get_repository_info(self) -> Dict[str, Any]:
-        """
-        Get repository information
-
-        Returns:
-            Repository information dictionary
-        """
-        try:
-            url = f"{self.api_base}/git/repositories/{self.repository}"
-            params = {'api-version': '7.0'}
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=self.headers, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        logger.info(f"Successfully fetched repository info for {self.repository}")
-                        return data
-                    else:
-                        logger.error(f"Failed to fetch repository info: {response.status}")
-                        return {}
-
-        except Exception as e:
-            logger.error(f"Error fetching repository info: {str(e)}")
-            return {}
-
-    async def create_pr_work_item(self, pr_id: str, work_item_type: str, title: str, description: str) -> Optional[int]:
-        """
-        Create a work item linked to a pull request
-
-        Args:
-            pr_id: Pull request ID
-            work_item_type: Type of work item (Bug, Task, etc.)
-            title: Work item title
-            description: Work item description
-
-        Returns:
-            Work item ID if created successfully
-        """
-        try:
-            # Create work item
-            url = f"https://dev.azure.com/{self.organization}/{self.project}/_apis/wit/workitems/${work_item_type}"
-            params = {'api-version': '7.0'}
-
-            # Work item patch document
-            patch_document = [
-                {
-                    "op": "add",
-                    "path": "/fields/System.Title",
-                    "value": title
-                },
-                {
-                    "op": "add",
-                    "path": "/fields/System.Description",
-                    "value": description
-                },
-                {
-                    "op": "add",
-                    "path": "/fields/System.Tags",
-                    "value": "PR-Validation"
-                }
-            ]
-
-            headers = self.headers.copy()
-            headers['Content-Type'] = 'application/json-patch+json'
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, params=params, json=patch_document) as response:
-                    if response.status in [200, 201]:
-                        work_item = await response.json()
-                        work_item_id = work_item.get('id')
-
-                        # Link work item to PR
-                        if work_item_id:
-                            await self._link_work_item_to_pr(pr_id, work_item_id)
-
-                        logger.info(f"Successfully created work item {work_item_id} for PR {pr_id}")
-                        return work_item_id
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Failed to create work item: {response.status} - {error_text}")
-                        return None
-
-        except Exception as e:
-            logger.error(f"Error creating work item for PR {pr_id}: {str(e)}")
-            return None
-
-    async def _link_work_item_to_pr(self, pr_id: str, work_item_id: int) -> bool:
-        """
-        Link a work item to a pull request
-
-        Args:
-            pr_id: Pull request ID
-            work_item_id: Work item ID
-
-        Returns:
-            Success status
-        """
-        try:
-            url = f"{self.api_base}/git/repositories/{self.repository}/pullrequests/{pr_id}/workitems"
-            params = {'api-version': '7.0'}
-
-            data = [{"id": str(work_item_id)}]
-
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=self.headers, params=params, json=data) as response:
-                    return response.status in [200, 201]
-
-        except Exception as e:
-            logger.error(f"Error linking work item {work_item_id} to PR {pr_id}: {str(e)}")
             return False
