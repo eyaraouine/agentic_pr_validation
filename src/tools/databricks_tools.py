@@ -4,7 +4,9 @@ from crewai_tools import tool
 from typing import Dict, Any, List, Optional, Union
 import re
 import ast
+import json
 
+from src.config import get_llm_instance
 from src.config.settings import Settings
 from src.utils.logger import setup_logger
 
@@ -69,6 +71,128 @@ def ensure_file_list(files: Union[List[Any], str, Dict[str, Any]]) -> List[Dict[
             })
 
     return result
+
+
+@tool("check_all_databricks_compliance")
+def check_all_databricks_compliance_tool(files: List[Dict[str, Any]]) -> str:
+    """
+    Run ALL Databricks compliance checks and return complete results.
+    This ensures all checks are executed even if agent times out.
+
+    Args:
+        files: List of Databricks files to validate
+
+    Returns:
+        JSON string with all validation results
+    """
+    logger.info("Running ALL Databricks compliance checks")
+
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+
+    results = {}
+
+    # Run all checks in order
+    try:
+        results["naming_conventions"] = check_databricks_naming_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in naming check: {e}")
+        results["naming_conventions"] = {
+            "checkpoint": "Naming Conventions",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "HIGH"
+        }
+
+    try:
+        results["security_best_practices"] = check_databricks_security_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in security check: {e}")
+        results["security_best_practices"] = {
+            "checkpoint": "Security Best Practices",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "CRITICAL"
+        }
+
+    try:
+        results["performance_optimization"] = check_databricks_performance_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in performance check: {e}")
+        results["performance_optimization"] = {
+            "checkpoint": "Code Performance",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "HIGH"
+        }
+
+    try:
+        results["git_integration"] = check_databricks_git_integration_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in git integration check: {e}")
+        results["git_integration"] = {
+            "checkpoint": "Git Integration",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "MEDIUM"
+        }
+
+    try:
+        results["testing_coverage"] = check_databricks_testing_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in testing check: {e}")
+        results["testing_coverage"] = {
+            "checkpoint": "Testing Coverage",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "HIGH"
+        }
+
+    try:
+        results["documentation"] = check_databricks_documentation_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in documentation check: {e}")
+        results["documentation"] = {
+            "checkpoint": "Code Documentation",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "MEDIUM"
+        }
+    llm = get_llm_instance()
+
+    for check_name, check_data in results.items():
+        if isinstance(check_data, dict) and check_data.get('status') == 'FAIL':
+            violations = check_data.get('violations', [])
+
+            if violations:
+                ai_suggestions = []
+
+                for violation in violations:
+                    file_path = violation.split(':')[0] if ':' in violation else ""
+                    file_content = next((f.get('content', '') for f in files_list if f.get('path') == file_path), '')
+
+                    prompt = f"""
+                    Fix this Databricks violation: {violation}
+                   
+                   Code:```python\n{file_content}\n```
+                   
+                   Provide ONLY the exact code fix needed. Be concise - maximum 2 sentences explanation.
+                        """
+
+                    response = llm.invoke(prompt)
+                    ai_suggestion = response.content if hasattr(response, 'content') else str(response)
+                    ai_suggestions.append(ai_suggestion)
+
+                check_data['generic_suggestions'] = check_data.get('suggestions', [])
+                check_data['ai_suggestions'] = ai_suggestions
+
+    return json.dumps(results, indent=2)
 
 
 @tool("check_databricks_naming")

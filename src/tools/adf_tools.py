@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional, Union
 import json
 import re
 
+from src.config import get_llm_instance
 from src.config.settings import Settings
 from src.utils.logger import setup_logger
 
@@ -69,6 +70,125 @@ def ensure_file_list(files: Union[List[Any], str, Dict[str, Any]]) -> List[Dict[
             })
 
     return result
+
+@tool("check_all_adf_compliance")
+def check_all_adf_compliance_tool(files: Union[List[Dict[str, Any]], str, Dict[str, Any]]) -> str:
+    """
+    Run ALL ADF compliance checks and return complete results.
+    Ensures that all validation tools for ADF (Azure Data Factory) are executed.
+
+    Args:
+        files: List of ADF files to validate (dict, list, or JSON string)
+
+    Returns:
+        JSON string with all validation results
+    """
+    logger.info("Running ALL ADF compliance checks")
+
+    files_list = ensure_file_list(files)
+    results = {}
+
+    try:
+        results["naming_convention"] = check_adf_naming_convention_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in naming check: {e}")
+        results["naming_convention"] = {
+            "checkpoint": "ADF Naming Convention",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "HIGH"
+        }
+
+    try:
+        results["security_best_practices"] = check_adf_security_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in security check: {e}")
+        results["security_best_practices"] = {
+            "checkpoint": "Security Best Practices",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "CRITICAL"
+        }
+
+    try:
+        results["pipeline_pattern"] = check_adf_pipeline_pattern_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in pipeline pattern check: {e}")
+        results["pipeline_pattern"] = {
+            "checkpoint": "Single Parent Pipeline Pattern",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "MEDIUM"
+        }
+
+    try:
+        results["parameterization"] = check_adf_parameterization_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in parameterization check: {e}")
+        results["parameterization"] = {
+            "checkpoint": "Parameterization Check",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "HIGH"
+        }
+
+    try:
+        results["validation"] = check_adf_validation_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in validation check: {e}")
+        results["validation"] = {
+            "checkpoint": "ADF Validation",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "CRITICAL"
+        }
+
+    try:
+        results["error_handling"] = check_adf_error_handling_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in error handling check: {e}")
+        results["error_handling"] = {
+            "checkpoint": "Error Handling and Alerts",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "CRITICAL"
+        }
+    llm = get_llm_instance()
+
+    for check_name, check_data in results.items():
+        if isinstance(check_data, dict) and check_data.get('status') == 'FAIL':
+            violations = check_data.get('violations', [])
+
+            if violations:
+                ai_suggestions = []
+
+                for violation in violations:
+                    file_path = violation.split(':')[0] if ':' in violation else ""
+                    file_content = next((f.get('content', '') for f in files_list if f.get('path') == file_path), '')
+
+                    prompt = f"""
+                    Fix this ADF violation: {violation}
+                   
+                   Code:```json\n{file_content}\n```
+                        
+                        Provide ONLY the exact code fix needed. Be concise - maximum 2 sentences explanation.
+                        """
+
+                    response = llm.invoke(prompt)
+                    ai_suggestion = response.content if hasattr(response, 'content') else str(response)
+                    ai_suggestions.append(ai_suggestion)
+
+                check_data['generic_suggestions'] = check_data.get('suggestions', [])
+                check_data['ai_suggestions'] = ai_suggestions
+
+
+    return json.dumps(results, indent=2)
 
 @tool("check_adf_naming_convention")
 def check_adf_naming_convention_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:

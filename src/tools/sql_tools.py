@@ -4,7 +4,9 @@ from crewai_tools import tool
 from typing import Dict, Any, List, Optional, Union
 import re
 import sqlparse
+import json
 
+from src.config import get_llm_instance
 from src.config.settings import Settings
 from src.utils.logger import setup_logger
 
@@ -70,6 +72,226 @@ def ensure_file_list(files: Union[List[Any], str, Dict[str, Any]]) -> List[Dict[
 
     return result
 
+
+@tool("check_all_sql_compliance")
+def check_all_sql_compliance_tool(files: List[Dict[str, Any]]) -> str:
+    """
+    Run ALL SQL compliance checks and return complete results.
+    Automatically detects if stored procedures check is needed based on file content.
+    This ensures all checks are executed even if agent times out.
+
+    Args:
+        files: List of SQL files to validate
+
+    Returns:
+        JSON string with all validation results
+    """
+    logger.info("Running ALL SQL compliance checks")
+
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+
+    # Auto-detect if stored procedures check is needed
+    should_check_procedures = False
+    for file in files_list:
+        content = file.get("content", "").upper()
+        if content:
+            # Check if file contains procedures or complex logic that might need procedures
+            if any([
+                "CREATE PROCEDURE" in content,
+                "ALTER PROCEDURE" in content,
+                content.count("JOIN") > 2,
+                "CURSOR" in content,
+                "WHILE" in content,
+                content.count("CASE WHEN") > 3,
+                "MERGE" in content
+            ]):
+                should_check_procedures = True
+                break
+
+    logger.info(f"Stored procedures check needed: {should_check_procedures}")
+
+    results = {}
+
+    # Run all mandatory checks
+    try:
+        results["check_sql_constraints"] = check_sql_constraints_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in constraints check: {e}")
+        results["check_sql_constraints"] = {
+            "checkpoint": "Use Constraints (PK/FK)",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "HIGH"
+        }
+
+    try:
+        results["check_sql_schemas"] = check_sql_schemas_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in schemas check: {e}")
+        results["check_sql_schemas"] = {
+            "checkpoint": "Use Schemas",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "MEDIUM"
+        }
+
+    try:
+        results["check_sql_naming_convention"] = check_sql_naming_convention_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in naming convention check: {e}")
+        results["check_sql_naming_convention"] = {
+            "checkpoint": "Aligned Naming Convention",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "MEDIUM"
+        }
+
+    try:
+        results["check_sql_security"] = check_sql_security_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in security check: {e}")
+        results["check_sql_security"] = {
+            "checkpoint": "Access Control",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "CRITICAL"
+        }
+
+    try:
+        results["check_sql_version_control"] = check_sql_version_control_tool.func(files_list)
+    except Exception as e:
+        logger.error(f"Error in version control check: {e}")
+        results["check_sql_version_control"] = {
+            "checkpoint": "Version Control",
+            "status": "FAIL",
+            "violations": [f"Error running check: {str(e)}"],
+            "suggestions": ["Fix the error and re-run the check"],
+            "severity": "HIGH"
+        }
+
+    # Include stored procedures check only if needed
+    if should_check_procedures:
+        try:
+            results["check_sql_stored_procedures"] = check_sql_stored_procedures_tool.func(files_list)
+        except Exception as e:
+            logger.error(f"Error in stored procedures check: {e}")
+            results["check_sql_stored_procedures"] = {
+                "checkpoint": "Use Stored Procedures",
+                "status": "FAIL",
+                "violations": [f"Error running check: {str(e)}"],
+                "suggestions": ["Fix the error and re-run the check"],
+                "severity": "MEDIUM"
+            }
+    else:
+        logger.info("No stored procedures or complex logic found, skipping stored procedures check")
+
+    llm = get_llm_instance()
+
+    for check_name, check_data in results.items():
+        if isinstance(check_data, dict) and check_data.get('status') == 'FAIL':
+            violations = check_data.get('violations', [])
+
+            if violations:
+                ai_suggestions = []
+
+                for violation in violations:
+                    file_path = violation.split(':')[0] if ':' in violation else ""
+                    file_content = next((f.get('content', '') for f in files_list if f.get('path') == file_path), '')
+
+                    prompt = f"""
+                    Fix this SQL violation: {violation}
+                   
+                   Code: ```sql\n{file_content}\n```
+                        
+                    Provide ONLY the exact code fix needed. Be concise - maximum 2 sentences explanation.
+                        """
+
+
+                    response = llm.invoke(prompt)
+
+                    if hasattr(response, 'content'):
+                        ai_suggestion = response.content
+                    else:
+                        ai_suggestion = str(response)
+
+                    ai_suggestions.append(ai_suggestion)
+
+                check_data['generic_suggestions'] = check_data.get('suggestions', [])
+                check_data['ai_suggestions'] = ai_suggestions
+
+    return json.dumps(results, indent=2)
+
+
+
+@tool("check_sql_stored_procedures")
+def check_sql_stored_procedures_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Check if logic is properly encapsulated in stored procedures
+
+    Args:
+        files: List of SQL files to validate
+
+    Returns:
+        Validation results with violations and suggestions
+    """
+    logger.info(f"Checking stored procedures for {len(files)} SQL files")
+
+    # Ensure proper file list format
+    files_list = ensure_file_list(files)
+    logger.info(f"Processing {len(files_list)} files")
+
+    violations = []
+    suggestions = []
+
+    for file in files_list:
+        content = file.get("content", "").upper()
+        file_path = file.get("path", "")
+
+        if not content:
+            logger.warning(f"No content provided for {file_path}")
+            continue
+
+        # Check if file contains business logic outside stored procedures
+        has_complex_logic = any([
+            content.count("JOIN") > 2,
+            "CURSOR" in content,
+            "WHILE" in content and "CREATE PROCEDURE" not in content,
+            content.count("CASE WHEN") > 3,
+            "MERGE" in content and "CREATE PROCEDURE" not in content
+        ])
+
+        if has_complex_logic and "CREATE PROCEDURE" not in content:
+            violations.append(
+                f"{file_path}: Complex business logic not encapsulated in stored procedure"
+            )
+            suggestions.append(
+                f"{file_path}: Move complex logic into a stored procedure for reusability"
+            )
+
+        # Check stored procedure structure
+        if "CREATE PROCEDURE" in content:
+            # Check for proper error handling
+            if "TRY" not in content or "CATCH" not in content:
+                violations.append(f"{file_path}: Stored procedure missing TRY-CATCH error handling")
+                suggestions.append(f"{file_path}: Add TRY-CATCH blocks for proper error handling")
+
+            # Check for transaction management
+            if "BEGIN TRANSACTION" in content and "COMMIT" not in content:
+                violations.append(f"{file_path}: Transaction started but not committed")
+                suggestions.append(f"{file_path}: Ensure all transactions are properly committed or rolled back")
+
+    return {
+        "checkpoint": "Use Stored Procedures",
+        "status": "PASS" if not violations else "FAIL",
+        "violations": violations,
+        "suggestions": suggestions,
+        "severity": "MEDIUM"
+    }
 
 @tool("check_sql_stored_procedures")
 def check_sql_stored_procedures_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -303,12 +525,14 @@ def check_sql_naming_convention_tool(files: List[Dict[str, Any]]) -> Dict[str, A
             continue
 
         # Check table names
-        tables = re.findall(r'CREATE\s+TABLE\s+\[?(\w+)\]?', content, re.IGNORECASE)
+        tables = re.findall(r'CREATE\s+TABLE\s+(?:\[?(?:\w+)\]?\.)?\[?(\w+)\]?', content, re.IGNORECASE)
         for table in tables:
+            # Skip schema names
+            if table.upper() in ['DBO', 'SYS', 'INFORMATION_SCHEMA']:
+                continue
             if not re.match(naming_rules["table"], table):
                 violations.append(f"{file_path}: Table '{table}' doesn't follow PascalCase convention")
                 suggestions.append(f"{file_path}: Rename table to PascalCase (e.g., 'CustomerOrders')")
-
         # Check stored procedures
         procedures = re.findall(r'CREATE\s+PROCEDURE\s+\[?(\w+)\]?', content, re.IGNORECASE)
         for proc in procedures:
