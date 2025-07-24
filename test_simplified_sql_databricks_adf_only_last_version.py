@@ -162,7 +162,7 @@ def identify_file_type(file_path: str, content: str) -> str:
 
 
 def generate_markdown_report2(sql_results, databricks_results, adf_results, sql_files, databricks_files, adf_files):
-    """Génère un rapport Markdown consolidé avec violations et suggestions associées."""
+    """Génère un rapport avec sections techniques détaillées et action items séparés."""
 
     def parse_json_result(results):
         if isinstance(results, dict):
@@ -199,25 +199,42 @@ def generate_markdown_report2(sql_results, databricks_results, adf_results, sql_
     databricks_results = parse_json_result(databricks_results)
     adf_results = parse_json_result(adf_results)
 
-    # Count passed/failed
+    # Count metrics
     def count_results(results):
         if not isinstance(results, dict):
-            return 0, 0
-        passed = failed = 0
+            return 0, 0, 0, 0
+        passed = failed = critical = high = 0
         for check in results.values():
             if isinstance(check, dict):
                 status = check.get('status', '').upper()
+                severity = check.get('severity', 'MEDIUM')
                 if status == 'PASS':
                     passed += 1
                 elif status == 'FAIL':
                     failed += 1
-        return passed, failed
+                    if severity == 'CRITICAL':
+                        critical += 1
+                    elif severity == 'HIGH':
+                        high += 1
+        return passed, failed, critical, high
 
-    sql_passed, sql_failed = count_results(sql_results)
-    db_passed, db_failed = count_results(databricks_results)
-    adf_passed, adf_failed = count_results(adf_results)
+    sql_passed, sql_failed, sql_critical, sql_high = count_results(sql_results)
+    db_passed, db_failed, db_critical, db_high = count_results(databricks_results)
+    adf_passed, adf_failed, adf_critical, adf_high = count_results(adf_results)
 
-    # Collect issues
+    # Calculate scores
+    def calc_score(passed, total):
+        return round((passed / total * 100), 1) if total > 0 else 0
+
+    sql_score = calc_score(sql_passed, sql_passed + sql_failed)
+    db_score = calc_score(db_passed, db_passed + db_failed)
+    adf_score = calc_score(adf_passed, adf_passed + adf_failed)
+    overall_score = calc_score(
+        sql_passed + db_passed + adf_passed,
+        sql_passed + sql_failed + db_passed + db_failed + adf_passed + adf_failed
+    )
+
+    # Collect issues for action items
     critical_issues, high_issues, medium_issues = [], [], []
 
     def collect_issues(results, tech_name):
@@ -227,19 +244,17 @@ def generate_markdown_report2(sql_results, databricks_results, adf_results, sql_
             if isinstance(check_data, dict) and check_data.get('status') == 'FAIL':
                 severity = check_data.get('severity', 'MEDIUM')
                 violations = check_data.get('violations', [])
-                ai_suggestions = check_data.get('ai_suggestions', [])
-                generic_suggestions = check_data.get('suggestions', [])
+                action_items = check_data.get('action_items', [])
 
                 for i, violation in enumerate(violations):
-                    ai_suggestion = ai_suggestions[i] if i < len(ai_suggestions) else ""
-                    generic_suggestion = generic_suggestions[i] if i < len(generic_suggestions) else ""
+                    action_item = action_items[i] if i < len(action_items) else ""
 
                     issue = {
                         'technology': tech_name,
                         'checkpoint': check_data.get('checkpoint', check_name),
                         'violation': violation,
-                        'ai_suggestion': ai_suggestion,
-                        'generic_suggestion': generic_suggestion
+                        'action_item': action_item,
+                        'severity': severity
                     }
 
                     if severity == 'CRITICAL':
@@ -253,155 +268,133 @@ def generate_markdown_report2(sql_results, databricks_results, adf_results, sql_
     collect_issues(databricks_results, "Databricks")
     collect_issues(adf_results, "ADF")
 
-    report = f"""# Comprehensive Compliance Report
+    # Generate report
+    from datetime import datetime
+    report_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-## Executive Summary
+    report = f"""# 📊 Comprehensive Compliance Report
 
-Analysis conducted on {len(sql_files)} SQL files, {len(databricks_files)} Databricks files, and {len(adf_files)} ADF files.
+*Generated on: {report_date}*
 
-- **Total Checks**: {len(sql_results) + len(databricks_results) + len(adf_results)}
-- **Passed**: {sql_passed + db_passed + adf_passed}
-- **Failed**: {sql_failed + db_failed + adf_failed}
+## 🎯 Executive Summary
 
-### Critical Findings
+**Overall Compliance Score: {overall_score}%** {'🟢' if overall_score >= 80 else '🟡' if overall_score >= 60 else '🔴'}
+
+| Technology | Files | Score | Passed | Failed | Critical | High |
+|-----------|--------|-------|---------|---------|----------|------|
+| SQL | {len(sql_files)} | {sql_score}% | {sql_passed} | {sql_failed} | {sql_critical} | {sql_high} |
+| Databricks | {len(databricks_files)} | {db_score}% | {db_passed} | {db_failed} | {db_critical} | {db_high} |
+| ADF | {len(adf_files)} | {adf_score}% | {adf_passed} | {adf_failed} | {adf_critical} | {adf_high} |
 
 """
 
-    if critical_issues:
-        for issue in critical_issues:
-            report += f"- **{issue['technology']} - {issue['checkpoint']}**: {issue['violation']}\n"
-    else:
-        report += "- No critical violations found.\n"
-
-    def add_section(title, files, results):
+    def add_technical_section(title, files, results, score):
         nonlocal report
         if files:
-            report += f"\n---\n\n## {title} Compliance Section\n\n"
+            score_emoji = '🟢' if score >= 80 else '🟡' if score >= 60 else '🔴'
+            report += f"\n---\n\n## 🔧 {title} Technical Analysis {score_emoji} {score}%\n\n"
 
             has_valid_results = (
-                    isinstance(results, dict) and
-                    results and
-                    any(isinstance(v, dict) for v in results.values())
-            )
+                        isinstance(results, dict) and results and any(isinstance(v, dict) for v in results.values()))
 
             if not has_valid_results:
-                report += f"⚠️ **Warning**: {title} analysis failed or returned no results.\n\n"
-            else:
-                report += "### Files Analyzed\n\n"
-                for file in files:
-                    report += f"- {file['path']}\n"
+                report += f"⚠️ **Warning**: {title} analysis failed.\n\n"
+                return
 
-                report += "\n### Compliance Results\n\n"
-                for check_name, check_data in results.items():
-                    if isinstance(check_data, dict):
-                        status_emoji = "✅" if check_data.get('status') == 'PASS' else "❌"
-                        severity = check_data.get('severity', 'MEDIUM')
-                        severity_color = {"CRITICAL": "🔴", "HIGH": "🟡", "MEDIUM": "🟢", "LOW": "🔵"}.get(severity, "")
+            # Show failed checks with detailed solutions
+            failed_checks = [check_data for check_data in results.values()
+                             if isinstance(check_data, dict) and check_data.get('status') == 'FAIL']
 
-                        report += f"#### {status_emoji} {check_data.get('checkpoint', check_name)}\n"
-                        report += f"- **Status**: {check_data.get('status', 'UNKNOWN')}\n"
-                        report += f"- **Severity**: {severity_color} {severity}\n\n"
+            if failed_checks:
+                report += "### ❌ Technical Issues & Solutions\n\n"
+                for check_data in failed_checks:
+                    severity = check_data.get('severity', 'MEDIUM')
+                    severity_color = {"CRITICAL": "🔴", "HIGH": "🟡", "MEDIUM": "🟢", "LOW": "🔵"}.get(severity, "")
 
-                        violations = check_data.get('violations', [])
-                        ai_suggestions = check_data.get('ai_suggestions', [])
-                        generic_suggestions = check_data.get('suggestions', [])
+                    report += f"<details>\n<summary><strong>{severity_color} {check_data.get('checkpoint', 'Unknown')} - {severity}</strong></summary>\n\n"
 
-                        if violations:
-                            report += "**Issues Found:**\n\n"
-                            for i, violation in enumerate(violations):
-                                report += f"**Issue {i + 1}:**\n"
-                                report += f"- 🚨 **Problem**: {violation}\n"
+                    violations = check_data.get('violations', [])
+                    detailed_solutions = check_data.get('detailed_solutions', [])
 
-                                if i < len(generic_suggestions):
-                                    report += f"- 💡 **Quick Fix**: {generic_suggestions[i]}\n"
+                    for i, violation in enumerate(violations):
+                        report += f"**Issue {i + 1}:**\n"
+                        report += f"- 🚨 **Problem**: {violation}\n"
 
-                                if i < len(ai_suggestions):
-                                    ai_suggestion = ai_suggestions[i]
+                        if i < len(detailed_solutions):
+                            solution = detailed_solutions[i]
+                            if '```' in solution:
+                                parts = solution.split('```')
+                                formatted_solution = ""
+                                for j, part in enumerate(parts):
+                                    if j % 2 == 0:  # Text
+                                        formatted_solution += part
+                                    else:  # Code
+                                        lines = part.split('\n', 1)
+                                        if len(lines) > 1:
+                                            lang = lines[0]
+                                            code = lines[1]
+                                            formatted_solution += f"\n\n```{lang}\n{code}\n```\n\n"
+                                        else:
+                                            formatted_solution += f"\n\n```\n{part}\n```\n\n"
+                            else:
+                                formatted_solution = solution
 
+                            report += f"- 🔧 **Technical Solution**: {formatted_solution}\n"
 
-                                    # Formatter le code correctement
-                                    if '```' in ai_suggestion:
-                                        # Séparer le texte et le code
-                                        parts = ai_suggestion.split('```')
-                                        formatted_suggestion = ""
-                                        for j, part in enumerate(parts):
-                                            if j % 2 == 0:  # Texte normal
-                                                formatted_suggestion += part
-                                            else:  # Code
-                                                # Extraire le langage et le code
-                                                lines = part.split('\n', 1)
-                                                if len(lines) > 1:
-                                                    lang = lines[0]
-                                                    code = lines[1]
-                                                    formatted_suggestion += f"\n\n```{lang}\n{code}\n```\n\n"
-                                                else:
-                                                    formatted_suggestion += f"\n\n```\n{part}\n```\n\n"
-                                    else:
-                                        formatted_suggestion = ai_suggestion
+                        report += "\n"
 
-                                    report += f"- 🤖 **Detailed Solution**: {formatted_suggestion}\n"
+                    report += "</details>\n\n"
 
-                                report += "\n"
+    add_technical_section("SQL", sql_files, sql_results, sql_score)
+    add_technical_section("Databricks", databricks_files, databricks_results, db_score)
+    add_technical_section("ADF", adf_files, adf_results, adf_score)
 
-                        report += "---\n\n"
+    # Action Items Section for Management
+    report += "\n---\n\n## 📋 Executive Action Plan\n\n"
 
-                passed = sum(1 for c in results.values() if isinstance(c, dict) and c.get('status') == 'PASS')
-                failed = sum(1 for c in results.values() if isinstance(c, dict) and c.get('status') == 'FAIL')
+    def estimate_time(issue):
+        severity = issue.get('severity', 'MEDIUM')
+        if 'password' in issue['violation'].lower() or 'secret' in issue['violation'].lower():
+            return "⏱️ ~30min"
+        elif 'naming' in issue['violation'].lower():
+            return "⏱️ ~15min"
+        elif severity == 'CRITICAL':
+            return "⏱️ ~2-4h"
+        elif severity == 'HIGH':
+            return "⏱️ ~1-2h"
+        else:
+            return "⏱️ ~30min"
 
-                report += f"### Summary Metrics\n\n"
-                report += f"- **Total Checks**: {len(results)}\n"
-                report += f"- **Passed**: {passed}\n"
-                report += f"- **Failed**: {failed}\n"
-
-    add_section("SQL", sql_files, sql_results)
-    add_section("Databricks", databricks_files, databricks_results)
-    add_section("ADF", adf_files, adf_results)
-
-    # Action Items
-    report += "\n---\n\n## Action Items\n\n"
-
-    def add_recommendations(issues, priority_name, priority_emoji):
+    def add_action_items(issues, priority_name, priority_emoji):
         nonlocal report
         if issues:
-            report += f"### {priority_emoji} {priority_name} Priority\n\n"
+            report += f"### {priority_emoji} {priority_name} ({len(issues)} issues)\n\n"
+
             for i, issue in enumerate(issues, 1):
-                report += f"**{i}. {issue['technology']} - {issue['checkpoint']}**\n\n"
-                report += f"**Issue**: {issue['violation']}\n\n"
+                time_est = estimate_time(issue)
+                report += f"**{i}. {issue['technology']} - {issue['checkpoint']}** {time_est}\n\n"
 
-                if issue['ai_suggestion']:
-                    ai_suggestion = issue['ai_suggestion']
+                report += f"**📍 Issue**: {issue['violation']}\n\n"
 
-
-                    # Formatter le code correctement
-                    if '```' in ai_suggestion:
-                        parts = ai_suggestion.split('```')
-                        formatted_suggestion = ""
-                        for j, part in enumerate(parts):
-                            if j % 2 == 0:  # Texte normal
-                                formatted_suggestion += part
-                            else:  # Code
-                                lines = part.split('\n', 1)
-                                if len(lines) > 1:
-                                    lang = lines[0]
-                                    code = lines[1]
-                                    formatted_suggestion += f"\n\n```{lang}\n{code}\n```\n\n"
-                                else:
-                                    formatted_suggestion += f"\n\n```\n{part}\n```\n\n"
-                    else:
-                        formatted_suggestion = ai_suggestion
-
-                    report += f"**Solution**: {formatted_suggestion}\n\n"
-                elif issue['generic_suggestion']:
-                    report += f"**Solution**: {issue['generic_suggestion']}\n\n"
+                if issue['action_item']:
+                    report += f"**🎯 Action Required**: {issue['action_item']}\n\n"
 
                 report += "---\n\n"
 
-    add_recommendations(critical_issues, "CRITICAL (Immediate Action)", "🔴")
-    add_recommendations(high_issues, "HIGH (Within 1 Week)", "🟡")
-    add_recommendations(medium_issues, "MEDIUM (Within 2 Weeks)", "🟢")
+    add_action_items(critical_issues, "CRITICAL (Immediate Action)", "🔴")
+    add_action_items(high_issues, "HIGH (Within 1 Week)", "🟡")
+    add_action_items(medium_issues, "MEDIUM (Within 2 Weeks)", "🟢")
 
-    if not (critical_issues or high_issues or medium_issues):
-        report += "✅ **Excellent!** No violations found. Continue following best practices.\n"
+    # Summary
+    total_issues = len(critical_issues) + len(high_issues) + len(medium_issues)
+    if total_issues == 0:
+        report += "✅ **Perfect Score!** All compliance checks passed.\n"
+    else:
+        total_time = len(critical_issues) * 3 + len(high_issues) * 1.5 + len(medium_issues) * 0.5
+        report += f"\n### 📈 Summary\n\n"
+        report += f"- **Total Issues**: {total_issues}\n"
+        report += f"- **Estimated Resolution Time**: {total_time:.1f} hours\n"
+        report += f"- **Target Score**: 80%+ compliance\n"
 
     return report
 

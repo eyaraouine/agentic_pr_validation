@@ -197,32 +197,49 @@ def check_all_sql_compliance_tool(files: List[Dict[str, Any]]) -> str:
             violations = check_data.get('violations', [])
 
             if violations:
-                ai_suggestions = []
+                detailed_solutions = []
+                action_items = []
 
                 for violation in violations:
                     file_path = violation.split(':')[0] if ':' in violation else ""
                     file_content = next((f.get('content', '') for f in files_list if f.get('path') == file_path), '')
 
-                    prompt = f"""
-                    Fix this SQL violation: {violation}
+                    # Detailed technical solution
+                    detailed_prompt = f"""
+                        Fix this SQL violation: {violation}
                    
                    Code: ```sql\n{file_content}\n```
                         
-                    Provide ONLY the exact code fix needed. Be concise - maximum 2 sentences explanation.
+                     Provide  maximum 2 short sentences explanation and below provide ONLY the exact code fix needed. 
                         """
 
+                    # Action item for managers
+                    action_prompt = f"""
+                        SQL compliance issue: {violation}
+                        
 
-                    response = llm.invoke(prompt)
+                        Provide executive summary:
+                        1. Business impact (1 short sentence)
+                        2. Required action (specific steps)
+                        3. Risk level if not fixed
 
-                    if hasattr(response, 'content'):
-                        ai_suggestion = response.content
-                    else:
-                        ai_suggestion = str(response)
+                        BE CONCISE - Maximum 2 short sentences per section
+                        
+                        """
 
-                    ai_suggestions.append(ai_suggestion)
+                    detailed_response = llm.invoke(detailed_prompt)
+                    action_response = llm.invoke(action_prompt)
+
+                    detailed_solutions.append(
+                        detailed_response.content if hasattr(detailed_response, 'content') else str(detailed_response)
+                    )
+                    action_items.append(
+                        action_response.content if hasattr(action_response, 'content') else str(action_response)
+                    )
 
                 check_data['generic_suggestions'] = check_data.get('suggestions', [])
-                check_data['ai_suggestions'] = ai_suggestions
+                check_data['detailed_solutions'] = detailed_solutions
+                check_data['action_items'] = action_items
 
     return json.dumps(results, indent=2)
 
@@ -293,71 +310,6 @@ def check_sql_stored_procedures_tool(files: List[Dict[str, Any]]) -> Dict[str, A
         "severity": "MEDIUM"
     }
 
-@tool("check_sql_stored_procedures")
-def check_sql_stored_procedures_tool(files: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Check if logic is properly encapsulated in stored procedures
-
-    Args:
-        files: List of SQL files to validate
-
-    Returns:
-        Validation results with violations and suggestions
-    """
-    logger.info(f"Checking stored procedures for {len(files)} SQL files")
-
-    # Ensure proper file list format
-    files_list = ensure_file_list(files)
-    logger.info(f"Processing {len(files_list)} files")
-
-    violations = []
-    suggestions = []
-
-    for file in files_list:
-        content = file.get("content", "").upper()
-        file_path = file.get("path", "")
-
-        if not content:
-            logger.warning(f"No content provided for {file_path}")
-            continue
-
-
-        # Check if file contains business logic outside stored procedures
-        has_complex_logic = any([
-            content.count("JOIN") > 2,
-            "CURSOR" in content,
-            "WHILE" in content and "CREATE PROCEDURE" not in content,
-            content.count("CASE WHEN") > 3,
-            "MERGE" in content and "CREATE PROCEDURE" not in content
-        ])
-
-        if has_complex_logic and "CREATE PROCEDURE" not in content:
-            violations.append(
-                f"{file_path}: Complex business logic not encapsulated in stored procedure"
-            )
-            suggestions.append(
-                f"{file_path}: Move complex logic into a stored procedure for reusability"
-            )
-
-        # Check stored procedure structure
-        if "CREATE PROCEDURE" in content:
-            # Check for proper error handling
-            if "TRY" not in content or "CATCH" not in content:
-                violations.append(f"{file_path}: Stored procedure missing TRY-CATCH error handling")
-                suggestions.append(f"{file_path}: Add TRY-CATCH blocks for proper error handling")
-
-            # Check for transaction management
-            if "BEGIN TRANSACTION" in content and "COMMIT" not in content:
-                violations.append(f"{file_path}: Transaction started but not committed")
-                suggestions.append(f"{file_path}: Ensure all transactions are properly committed or rolled back")
-
-    return {
-        "checkpoint": "Use Stored Procedures",
-        "status": "PASS" if not violations else "FAIL",
-        "violations": violations,
-        "suggestions": suggestions,
-        "severity": "MEDIUM"
-    }
 
 
 @tool("check_sql_constraints")

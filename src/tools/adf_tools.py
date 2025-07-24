@@ -166,29 +166,49 @@ def check_all_adf_compliance_tool(files: Union[List[Dict[str, Any]], str, Dict[s
             violations = check_data.get('violations', [])
 
             if violations:
-                ai_suggestions = []
+                detailed_solutions = []
+                action_items = []
 
                 for violation in violations:
                     file_path = violation.split(':')[0] if ':' in violation else ""
                     file_content = next((f.get('content', '') for f in files_list if f.get('path') == file_path), '')
 
-                    prompt = f"""
-                    Fix this ADF violation: {violation}
+                    detailed_prompt = f"""`
+    
+                        Fix this ADF violation: {violation}
                    
-                   Code:```json\n{file_content}\n```
+                         Code:```json\n{file_content}\n```
                         
-                        Provide ONLY the exact code fix needed. Be concise - maximum 2 sentences explanation.
+                        Provide  maximum 2 shortsentences explanation and below provide ONLY the exact code fix needed. 
                         """
 
-                    response = llm.invoke(prompt)
-                    ai_suggestion = response.content if hasattr(response, 'content') else str(response)
-                    ai_suggestions.append(ai_suggestion)
+
+
+                    action_prompt = f"""
+                        ADF compliance issue: {violation}
+
+                        Management summary:
+                        1. Business continuity impact
+                        2. Required configuration change
+                        3. Risk assessment
+
+                        BE CONCISE - Maximum 2 short sentences per section
+                        """
+
+                    detailed_response = llm.invoke(detailed_prompt)
+                    action_response = llm.invoke(action_prompt)
+
+                    detailed_solutions.append(
+                        detailed_response.content if hasattr(detailed_response, 'content') else str(detailed_response))
+                    action_items.append(
+                        action_response.content if hasattr(action_response, 'content') else str(action_response))
 
                 check_data['generic_suggestions'] = check_data.get('suggestions', [])
-                check_data['ai_suggestions'] = ai_suggestions
-
+                check_data['detailed_solutions'] = detailed_solutions
+                check_data['action_items'] = action_items
 
     return json.dumps(results, indent=2)
+
 
 @tool("check_adf_naming_convention")
 def check_adf_naming_convention_tool(files: Union[List[Dict[str, Any]], List[str]]) -> Dict[str, Any]:
